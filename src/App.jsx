@@ -19,6 +19,7 @@ const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 // --- 🔒 CONFIGURATION 🔒 ---
 
 // 1. REPLACE WITH YOUR GMAIL ADDRESS(ES)
+// ✅ CORRECT
 const ADMIN_EMAILS = ["mannikdaniel@gmail.com", "ehijieizunyon28@gmail.com"]; 
 
 // 2. REPLACE WITH YOUR BANK DETAILS
@@ -959,7 +960,7 @@ export default function EatAi() {
   const [activeFilters, setActiveFilters] = useState([]);
 
   // --- 🔒 SECURITY CHECK: LIST YOUR ADMIN EMAIL HERE 🔒 ---
-  const ADMIN_EMAILS = ["your-email@gmail.com", "partner@gmail.com"]; 
+  const ADMIN_EMAILS = ["mannikdaniel@gmail.com", "ehijieizuyon28@gmail.com"]; 
   const isAdmin = user && ADMIN_EMAILS.includes(user.email);
 
   useEffect(() => {

@@ -17,13 +17,13 @@ import { ethers } from 'ethers';
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 // --- 🔒 CONFIGURATION 🔒 ---
-const ADMIN_EMAILS = ["your-email@gmail.com", "partner@gmail.com"]; 
+const ADMIN_EMAILS = ["mannikdaniel@gmail.com", "ehijieizunyon28@gmail.com"]; 
 // ⚠️ Make sure these are all lowercase in the code!
 
 const BANK_DETAILS = {
   bank: "OPay",
-  number: "8012345678", 
-  name: "EatAi Ventures"
+  number: "7060632004", 
+  name: "Izunyon Ehijie"
 };
 
 // --- REUSABLE COMPONENTS ---
@@ -948,7 +948,7 @@ export default function EatAi() {
   const [activeFilters, setActiveFilters] = useState([]);
 
   // --- 🔒 SECURITY CHECK: LIST YOUR ADMIN EMAIL HERE 🔒 ---
-  const ADMIN_EMAILS = ["your-email@gmail.com", "partner@gmail.com"]; 
+  const ADMIN_EMAILS = ["mannikdaniel@gmail.com", "ehijieizunyon28@gmail.com"]; 
   // Force lowercase comparison for safety
   const currentEmail = user?.email?.toLowerCase();
   const isAdmin = user && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(currentEmail);

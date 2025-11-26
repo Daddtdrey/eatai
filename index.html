@@ -2,9 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>eatai</title>
+    
+    <!-- 1. The Browser Tab Icon (Favicon) -->
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    
+    <!-- 2. The iOS Home Screen Icon (Crucial for iPhones) -->
+    <link rel="apple-touch-icon" href="/logo.svg" />
+    
+    <!-- 3. The Android Manifest (Crucial for Android PWA) -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    
+    <!-- This makes the top status bar on mobile match your brand color -->
+    <meta name="theme-color" content="#f97316" />
+    
+    <title>EatAi - Your Food Concierge</title>
   </head>
   <body>
     <div id="root"></div>

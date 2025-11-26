@@ -17,16 +17,13 @@ import { ethers } from 'ethers';
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 // --- 🔒 CONFIGURATION 🔒 ---
+const ADMIN_EMAILS = ["your-email@gmail.com", "partner@gmail.com"]; 
+// ⚠️ Make sure these are all lowercase in the code!
 
-// 1. REPLACE WITH YOUR GMAIL ADDRESS(ES)
-// ✅ CORRECT
-const ADMIN_EMAILS = ["mannikdaniel@gmail.com", "ehijieizunyon28@gmail.com"]; 
-
-// 2. REPLACE WITH YOUR BANK DETAILS
 const BANK_DETAILS = {
   bank: "OPay",
-  number: "7060632004", 
-  name: "izunyon ehijie"
+  number: "8012345678", 
+  name: "EatAi Ventures"
 };
 
 // --- REUSABLE COMPONENTS ---
@@ -64,16 +61,13 @@ const DietaryFilter = ({ icon: Icon, label, active, onClick }) => (
 // --- VIEW COMPONENTS ---
 
 const AdminView = ({ setCurrentView, marketData, refreshData }) => {
-  const [activeTab, setActiveTab] = useState('orders'); // Default to orders so you see them first
+  const [activeTab, setActiveTab] = useState('orders'); 
   const [adminOrders, setAdminOrders] = useState([]);
-  
-  // Product Form State
   const [newItem, setNewItem] = useState({
     name: '', price: '', vendor: '', category: 'fullMeal', desc: '', stock: 10, image: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Load orders when tab allows
   useEffect(() => {
     if (activeTab === 'orders') {
       const loadAdminOrders = async () => {
@@ -87,7 +81,6 @@ const AdminView = ({ setCurrentView, marketData, refreshData }) => {
   const handleStatusUpdate = async (orderId, newStatus) => {
     if(confirm(`Mark this order as ${newStatus}?`)) {
         await updateOrderStatus(orderId, newStatus);
-        // Optimistic update locally
         setAdminOrders(adminOrders.map(o => o.id === orderId ? {...o, status: newStatus} : o));
     }
   };
@@ -95,16 +88,13 @@ const AdminView = ({ setCurrentView, marketData, refreshData }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
     let imageIcon = newItem.image || '🍽️'; 
-
     await addProduct({ 
         ...newItem, 
         price: parseFloat(newItem.price), 
         stock: parseInt(newItem.stock),
         image: imageIcon
     });
-    
     alert("Product Added!");
     setNewItem({ name: '', price: '', vendor: '', category: 'fullMeal', desc: '', stock: 10, image: '' });
     await refreshData();
@@ -120,8 +110,6 @@ const AdminView = ({ setCurrentView, marketData, refreshData }) => {
 
   return (
     <ViewContainer title="Manager HQ" showBack onBack={() => setCurrentView('home')}>
-      
-      {/* Tabs */}
       <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
         <button 
             onClick={() => setActiveTab('orders')}
@@ -137,11 +125,9 @@ const AdminView = ({ setCurrentView, marketData, refreshData }) => {
         </button>
       </div>
 
-      {/* ORDERS TAB */}
       {activeTab === 'orders' && (
         <div className="space-y-4 pb-24">
             {adminOrders.length === 0 && <p className="text-center text-gray-400 mt-10">No orders found.</p>}
-            
             {adminOrders.map(order => (
                 <div key={order.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
                     <div className="flex justify-between items-start mb-3">
@@ -160,21 +146,17 @@ const AdminView = ({ setCurrentView, marketData, refreshData }) => {
                             <p className="text-xs text-gray-500 uppercase">{order.paymentMethod}</p>
                         </div>
                     </div>
-                    
-                    {/* Sender Info */}
                     {order.paymentMethod === 'transfer' && (
                         <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg mb-2 border border-blue-100 dark:border-blue-800">
                             <p className="text-xs text-blue-800 dark:text-blue-200">
-                                <strong>Sender Name:</strong> {order.transferName}
+                                <strong>Sender:</strong> {order.transferName}
                             </p>
                         </div>
                     )}
-
                     <div className="bg-gray-50 dark:bg-gray-900/50 p-2 rounded-lg mb-2">
-                        <p className="text-xs text-gray-500 uppercase font-bold mb-1">Delivery Address:</p>
+                        <p className="text-xs text-gray-500 uppercase font-bold mb-1">Delivery To:</p>
                         <p className="text-sm dark:text-gray-300 font-medium">{order.deliveryAddress}</p>
                     </div>
-
                     <div className="border-t dark:border-gray-700 pt-2 mb-4">
                         {order.items.map((item, i) => (
                             <div key={i} className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
@@ -183,8 +165,6 @@ const AdminView = ({ setCurrentView, marketData, refreshData }) => {
                             </div>
                         ))}
                     </div>
-
-                    {/* Action Buttons */}
                     {order.status === 'pending' && (
                         <button onClick={() => handleStatusUpdate(order.id, 'confirmed')} className="w-full bg-green-600 text-white py-3 rounded-lg text-sm font-bold shadow hover:bg-green-700">
                             Confirm Payment & Order
@@ -200,7 +180,6 @@ const AdminView = ({ setCurrentView, marketData, refreshData }) => {
         </div>
       )}
 
-      {/* INVENTORY TAB */}
       {activeTab === 'products' && (
         <>
           <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 mb-8">
@@ -294,8 +273,6 @@ const OrdersView = ({ setCurrentView, user }) => {
             <div key={order.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-xs font-mono text-gray-400">#{order.id.slice(0, 8)}</span>
-                
-                {/* STATUS BADGE */}
                 <span className={`text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 ${
                     order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 
                     order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' :
@@ -307,7 +284,6 @@ const OrdersView = ({ setCurrentView, user }) => {
                   {order.status.toUpperCase()}
                 </span>
               </div>
-              
               <div className="flex justify-between items-end">
                 <div className="flex-1 mr-4">
                   <p className="font-bold text-gray-800 dark:text-white">{order.items.length} Items</p>
@@ -460,6 +436,18 @@ const HomeView = ({ setCurrentView, user }) => (
         <p className="text-gray-500 dark:text-gray-400 text-lg">
           Welcome back, {user?.displayName?.split(' ')[0]}!
         </p>
+        
+        {/* NEW: BIG ORDERS BUTTON FOR MOBILE VISIBILITY */}
+        <div className="grid grid-cols-1 gap-4 w-full max-w-md pt-4">
+           <button 
+              onClick={() => setCurrentView('orders')}
+              className="flex items-center justify-center gap-2 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-bold py-4 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 hover:border-orange-200 transition-all"
+            >
+              <Package className="w-5 h-5 text-orange-500" />
+              View My Orders
+           </button>
+        </div>
+
       </div>
   
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-md">
@@ -960,8 +948,10 @@ export default function EatAi() {
   const [activeFilters, setActiveFilters] = useState([]);
 
   // --- 🔒 SECURITY CHECK: LIST YOUR ADMIN EMAIL HERE 🔒 ---
-  const ADMIN_EMAILS = ["mannikdaniel@gmail.com", "ehijieizuyon28@gmail.com"]; 
-  const isAdmin = user && ADMIN_EMAILS.includes(user.email);
+  const ADMIN_EMAILS = ["your-email@gmail.com", "partner@gmail.com"]; 
+  // Force lowercase comparison for safety
+  const currentEmail = user?.email?.toLowerCase();
+  const isAdmin = user && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(currentEmail);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -1078,7 +1068,7 @@ export default function EatAi() {
           setCurrentView={setCurrentView} 
           marketSection={marketSection} 
           removeFromCart={removeFromCart} 
-          cartTotal={cartTotal}
+          cartTotal={Number(cartTotal)}
           globalWallet={globalWallet}
           user={user}
         />

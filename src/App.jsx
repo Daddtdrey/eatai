@@ -4,16 +4,29 @@ import {
   ShoppingCart, Heart, Flame, Baby, Droplet, Plus, Minus, X,
   Moon, Sun, Leaf, Beef, Zap, Cookie, LogOut, User, Wallet, 
   Copy, Eye, EyeOff, CreditCard, Package, Clock, CheckCircle, 
-  Lock, Database, Trash2
+  Lock, Database, Trash2, Smile, Box, Landmark, MapPin, Truck, ShieldCheck
 } from 'lucide-react';
 import { 
   auth, signInWithGoogle, logout, saveWalletToProfile, createOrder, 
-  getUserOrders, getAllProducts, seedDatabase, addProduct, deleteProduct 
+  getUserOrders, getAllProducts, seedDatabase, addProduct, deleteProduct,
+  getAllOrders, updateOrderStatus
 } from './firebase'; 
 import { onAuthStateChanged } from 'firebase/auth';
 import { ethers } from 'ethers';
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+
+// --- 🔒 CONFIGURATION 🔒 ---
+
+// 1. REPLACE WITH YOUR GMAIL ADDRESS(ES)
+const ADMIN_EMAILS = ["mannikdaniel@gmail.com", "ehijieizunyon28@gmail.com"]; 
+
+// 2. REPLACE WITH YOUR BANK DETAILS
+const BANK_DETAILS = {
+  bank: "OPay",
+  number: "7060632004", 
+  name: "izunyon ehijie"
+};
 
 // --- REUSABLE COMPONENTS ---
 
@@ -50,22 +63,49 @@ const DietaryFilter = ({ icon: Icon, label, active, onClick }) => (
 // --- VIEW COMPONENTS ---
 
 const AdminView = ({ setCurrentView, marketData, refreshData }) => {
+  const [activeTab, setActiveTab] = useState('orders'); // Default to orders so you see them first
+  const [adminOrders, setAdminOrders] = useState([]);
+  
+  // Product Form State
   const [newItem, setNewItem] = useState({
-    name: '', price: '', vendor: '', category: 'fullMeal', desc: ''
+    name: '', price: '', vendor: '', category: 'fullMeal', desc: '', stock: 10, image: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Load orders when tab allows
+  useEffect(() => {
+    if (activeTab === 'orders') {
+      const loadAdminOrders = async () => {
+        const data = await getAllOrders();
+        setAdminOrders(data);
+      };
+      loadAdminOrders();
+    }
+  }, [activeTab]);
+
+  const handleStatusUpdate = async (orderId, newStatus) => {
+    if(confirm(`Mark this order as ${newStatus}?`)) {
+        await updateOrderStatus(orderId, newStatus);
+        // Optimistic update locally
+        setAdminOrders(adminOrders.map(o => o.id === orderId ? {...o, status: newStatus} : o));
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
-    let image = '🍽️'; 
-    if (newItem.category === 'fullMeal') image = '🍱';
-    if (newItem.category === 'pregnancy') image = '🥒';
-    if (newItem.category === 'male') image = '🍖';
+    
+    let imageIcon = newItem.image || '🍽️'; 
 
-    await addProduct({ ...newItem, price: parseFloat(newItem.price), image });
+    await addProduct({ 
+        ...newItem, 
+        price: parseFloat(newItem.price), 
+        stock: parseInt(newItem.stock),
+        image: imageIcon
+    });
+    
     alert("Product Added!");
-    setNewItem({ name: '', price: '', vendor: '', category: 'fullMeal', desc: '' });
+    setNewItem({ name: '', price: '', vendor: '', category: 'fullMeal', desc: '', stock: 10, image: '' });
     await refreshData();
     setIsSubmitting(false);
   };
@@ -78,58 +118,149 @@ const AdminView = ({ setCurrentView, marketData, refreshData }) => {
   };
 
   return (
-    <ViewContainer title="Manager Dashboard" showBack onBack={() => setCurrentView('home')}>
-      {/* Add Item Form */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 mb-8">
-        <h3 className="font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-          <Plus className="w-5 h-5 text-orange-500" /> Add New Item
-        </h3>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <input required placeholder="Item Name" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
-              value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} />
-            <input required type="number" placeholder="Price ($)" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
-              value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <input required placeholder="Vendor Name" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
-              value={newItem.vendor} onChange={e => setNewItem({...newItem, vendor: e.target.value})} />
-            <select className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full"
-              value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>
-              <option value="fullMeal">Full Meal</option>
-              <option value="pregnancy">Pregnancy</option>
-              <option value="period">Period</option>
-              <option value="male">Male</option>
-              <option value="normal">Normal</option>
-            </select>
-          </div>
-          <input required placeholder="Short Description" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
-            value={newItem.desc} onChange={e => setNewItem({...newItem, desc: e.target.value})} />
-          
-          <button disabled={isSubmitting} className="w-full bg-gray-900 dark:bg-orange-600 text-white font-bold py-3 rounded-xl hover:opacity-90">
-            {isSubmitting ? 'Saving...' : 'Save to Database'}
-          </button>
-        </form>
+    <ViewContainer title="Manager HQ" showBack onBack={() => setCurrentView('home')}>
+      
+      {/* Tabs */}
+      <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
+        <button 
+            onClick={() => setActiveTab('orders')}
+            className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors ${activeTab === 'orders' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}
+        >
+            Incoming Orders
+        </button>
+        <button 
+            onClick={() => setActiveTab('products')}
+            className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors ${activeTab === 'products' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}
+        >
+            Inventory
+        </button>
       </div>
 
-      {/* Item List */}
-      <h3 className="font-bold text-gray-800 dark:text-white mb-4">Current Inventory ({marketData.length})</h3>
-      <div className="space-y-3 pb-20">
-        {marketData.map(item => (
-          <div key={item.id} className="flex justify-between items-center bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">{item.image}</span>
-              <div>
-                <p className="font-bold text-gray-800 dark:text-white text-sm">{item.name}</p>
-                <p className="text-xs text-gray-500">${item.price} • {item.category}</p>
+      {/* ORDERS TAB */}
+      {activeTab === 'orders' && (
+        <div className="space-y-4 pb-24">
+            {adminOrders.length === 0 && <p className="text-center text-gray-400 mt-10">No orders found.</p>}
+            
+            {adminOrders.map(order => (
+                <div key={order.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                    <div className="flex justify-between items-start mb-3">
+                        <div>
+                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                                order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
+                                order.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 
+                                'bg-green-100 text-green-800'
+                            }`}>
+                                {order.status.toUpperCase()}
+                            </span>
+                            <p className="text-xs text-gray-400 mt-1">{new Date(order.createdAt).toLocaleString()}</p>
+                        </div>
+                        <div className="text-right">
+                            <p className="font-black text-lg dark:text-white">₦{order.total.toLocaleString()}</p>
+                            <p className="text-xs text-gray-500 uppercase">{order.paymentMethod}</p>
+                        </div>
+                    </div>
+                    
+                    {/* Sender Info */}
+                    {order.paymentMethod === 'transfer' && (
+                        <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg mb-2 border border-blue-100 dark:border-blue-800">
+                            <p className="text-xs text-blue-800 dark:text-blue-200">
+                                <strong>Sender Name:</strong> {order.transferName}
+                            </p>
+                        </div>
+                    )}
+
+                    <div className="bg-gray-50 dark:bg-gray-900/50 p-2 rounded-lg mb-2">
+                        <p className="text-xs text-gray-500 uppercase font-bold mb-1">Delivery Address:</p>
+                        <p className="text-sm dark:text-gray-300 font-medium">{order.deliveryAddress}</p>
+                    </div>
+
+                    <div className="border-t dark:border-gray-700 pt-2 mb-4">
+                        {order.items.map((item, i) => (
+                            <div key={i} className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
+                                <span>1x {item.name} ({item.vendor})</span>
+                                <span>₦{item.price}</span>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Action Buttons */}
+                    {order.status === 'pending' && (
+                        <button onClick={() => handleStatusUpdate(order.id, 'confirmed')} className="w-full bg-green-600 text-white py-3 rounded-lg text-sm font-bold shadow hover:bg-green-700">
+                            Confirm Payment & Order
+                        </button>
+                    )}
+                    {order.status === 'confirmed' && (
+                        <button onClick={() => handleStatusUpdate(order.id, 'delivered')} className="w-full bg-gray-900 dark:bg-gray-700 text-white py-3 rounded-lg text-sm font-bold">
+                            Mark as Delivered
+                        </button>
+                    )}
+                </div>
+            ))}
+        </div>
+      )}
+
+      {/* INVENTORY TAB */}
+      {activeTab === 'products' && (
+        <>
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 mb-8">
+            <h3 className="font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+              <Plus className="w-5 h-5 text-orange-500" /> Add New Item
+            </h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <input required placeholder="Name" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
+                  value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} />
+                <input required type="number" placeholder="Price (₦)" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
+                  value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
               </div>
-            </div>
-            <button onClick={() => handleDelete(item.id)} className="p-2 text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full">
-              <Trash2 className="w-5 h-5" />
-            </button>
+              <div className="grid grid-cols-2 gap-4">
+                <input required placeholder="Vendor" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
+                  value={newItem.vendor} onChange={e => setNewItem({...newItem, vendor: e.target.value})} />
+                <select className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full"
+                  value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>
+                  <option value="fullMeal">Full Meal</option>
+                  <option value="pregnancy">Pregnancy</option>
+                  <option value="period">Period</option>
+                  <option value="male">Male</option>
+                  <option value="normal">Normal</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
+                    <Box className="w-5 h-5 text-gray-500" />
+                    <input required type="number" placeholder="Stock" className="bg-transparent border-none w-full outline-none dark:text-white" 
+                    value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
+                </div>
+                <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
+                    <Smile className="w-5 h-5 text-gray-500" />
+                    <input placeholder="Emoji" className="bg-transparent border-none w-full outline-none dark:text-white" 
+                    value={newItem.image} onChange={e => setNewItem({...newItem, image: e.target.value})} />
+                </div>
+              </div>
+              <button disabled={isSubmitting} className="w-full bg-gray-900 dark:bg-orange-600 text-white font-bold py-3 rounded-xl">
+                {isSubmitting ? 'Saving...' : 'Save Item'}
+              </button>
+            </form>
           </div>
-        ))}
-      </div>
+
+          <div className="space-y-3 pb-20">
+            {marketData.map(item => (
+              <div key={item.id} className="flex justify-between items-center bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{item.image}</span>
+                  <div>
+                    <p className="font-bold text-gray-800 dark:text-white text-sm">{item.name}</p>
+                    <p className="text-xs text-gray-500">₦{item.price.toLocaleString()} • Stock: {item.stock}</p>
+                  </div>
+                </div>
+                <button onClick={() => handleDelete(item.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-full">
+                  <Trash2 className="w-5 h-5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </ViewContainer>
   );
 };
@@ -162,19 +293,28 @@ const OrdersView = ({ setCurrentView, user }) => {
             <div key={order.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-xs font-mono text-gray-400">#{order.id.slice(0, 8)}</span>
-                <span className={`text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
-                  {order.status === 'pending' ? <Clock className="w-3 h-3" /> : <CheckCircle className="w-3 h-3" />}
+                
+                {/* STATUS BADGE */}
+                <span className={`text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 ${
+                    order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 
+                    order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' :
+                    'bg-green-100 text-green-700'
+                }`}>
+                  {order.status === 'pending' ? <Clock className="w-3 h-3" /> : 
+                   order.status === 'confirmed' ? <ShieldCheck className="w-3 h-3" /> :
+                   <CheckCircle className="w-3 h-3" />}
                   {order.status.toUpperCase()}
                 </span>
               </div>
+              
               <div className="flex justify-between items-end">
-                <div>
+                <div className="flex-1 mr-4">
                   <p className="font-bold text-gray-800 dark:text-white">{order.items.length} Items</p>
-                  <p className="text-sm text-gray-500">{new Date(order.createdAt).toLocaleDateString()}</p>
+                  <p className="text-xs text-gray-500 truncate">{order.deliveryAddress}</p>
                 </div>
                 <div className="text-right">
-                   <p className="text-xs text-gray-400">{order.paymentMethod === 'crypto' ? 'ETH Payment' : 'Card Payment'}</p>
-                   <p className="text-xl font-black text-orange-500">${order.total.toFixed(2)}</p>
+                   <p className="text-xs text-gray-400 capitalize">{order.paymentMethod}</p>
+                   <p className="text-xl font-black text-orange-500">₦{order.total.toLocaleString()}</p>
                 </div>
               </div>
             </div>
@@ -481,20 +621,25 @@ const DeciderView = ({ ingredients, setIngredients, generateRecipes, isThinking,
         <div className="grid grid-cols-1 gap-4 overflow-y-auto pb-24 scrollbar-hide">
           {products.map((item) => (
             <div key={item.id} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center gap-4 animate-fade-in transition-colors">
-              <div className="w-20 h-20 bg-gray-50 dark:bg-gray-700 rounded-xl flex items-center justify-center text-4xl shrink-0">
+              <div className="w-20 h-20 bg-gray-50 dark:bg-gray-700 rounded-xl flex items-center justify-center text-4xl shrink-0 overflow-hidden">
+                {/* Render Emoji or Image URL */}
                 {item.image}
               </div>
               <div className="flex-1">
                 <h4 className="font-bold text-gray-800 dark:text-white">{item.name}</h4>
                 <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded text-gray-500 dark:text-gray-300 font-bold">{item.vendor}</span>
+                    {/* Stock Badge */}
+                    {(item.stock === 0) && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded font-bold">Sold Out</span>}
+                    {(item.stock > 0 && item.stock < 5) && <span className="text-xs bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded font-bold">Low Stock</span>}
                 </div>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">{item.desc}</p>
-                <div className="text-orange-600 dark:text-orange-400 font-bold">${item.price.toFixed(2)}</div>
+                <div className="text-orange-600 dark:text-orange-400 font-bold">₦{item.price.toLocaleString()}</div>
               </div>
               <button 
                 onClick={() => addToCart(item)}
-                className="p-3 bg-gray-900 dark:bg-orange-500 text-white rounded-xl hover:bg-gray-700 dark:hover:bg-orange-600 transition-colors"
+                disabled={item.stock === 0}
+                className={`p-3 text-white rounded-xl transition-colors ${item.stock === 0 ? 'bg-gray-300 cursor-not-allowed' : 'bg-gray-900 dark:bg-orange-500 hover:bg-gray-700 dark:hover:bg-orange-600'}`}
               >
                 <Plus className="w-5 h-5" />
               </button>
@@ -509,87 +654,155 @@ const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globa
   if (!isOpen) return null;
 
   const [processing, setProcessing] = useState(false);
+  const [transferName, setTransferName] = useState('');
+  const [address, setAddress] = useState('');
   const [cardNumber, setCardNumber] = useState('');
   const [expiry, setExpiry] = useState('');
   const [cvv, setCvv] = useState('');
 
   const handlePayment = async () => {
+    // Simple Validation
+    if (paymentMethod === 'transfer' && (!transferName || !address)) {
+        alert("Please fill in all fields");
+        return;
+    }
+    if (paymentMethod === 'card' && (!cardNumber || !expiry || !cvv || !address)) {
+        alert("Please fill in all fields");
+        return;
+    }
+    if (paymentMethod === 'crypto' && !address) {
+        alert("Please enter delivery address");
+        return;
+    }
+
     setProcessing(true);
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    
+    // Simulate slight delay
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
     if (paymentMethod === 'crypto') {
         try {
             if (!globalWallet) throw new Error("No wallet found");
-        } catch (e) {
-        }
+        } catch (e) {}
     }
 
-    await createOrder(user.uid, cart, total, paymentMethod, globalWallet?.address);
+    await createOrder(user.uid, cart, total, paymentMethod, globalWallet?.address, address, transferName);
     setProcessing(false);
     onSuccess();
   };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
-        <div className="bg-white dark:bg-gray-900 w-full max-w-md p-6 rounded-t-3xl md:rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-800 relative animate-slide-up">
+        <div className="bg-white dark:bg-gray-900 w-full max-w-md p-6 rounded-t-3xl md:rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-800 relative animate-slide-up max-h-[90vh] overflow-y-auto">
             <button onClick={onClose} className="absolute top-4 right-4 p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full">
                 <X className="w-5 h-5 text-gray-500" />
             </button>
 
             <div className="mb-6 text-center">
                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
-                    {paymentMethod === 'crypto' ? 'Confirm Crypto Payment' : 'Secure Checkout'}
+                    {paymentMethod === 'crypto' ? 'Confirm Crypto' : (paymentMethod === 'transfer' ? 'Bank Transfer' : 'Card Payment')}
                 </h3>
-                <p className="text-gray-500 text-sm">Total Amount: <span className="font-bold text-orange-500">${total}</span></p>
+                <p className="text-gray-500 text-sm">Total Amount: <span className="font-bold text-orange-500">₦{total.toLocaleString()}</span></p>
             </div>
 
-            {paymentMethod === 'card' ? (
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Card Number</label>
-                        <div className="relative">
-                            <CreditCard className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                            <input 
-                                type="text" 
-                                placeholder="0000 0000 0000 0000" 
-                                className="w-full pl-10 p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none"
-                                value={cardNumber}
-                                onChange={e => setCardNumber(e.target.value)}
-                            />
-                        </div>
+            {/* PAYMENT FORMS */}
+            <div className="space-y-4">
+                
+                {/* TRANSFER MODE */}
+                {paymentMethod === 'transfer' && (
+                    <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl mb-4 border border-blue-100 dark:border-blue-800">
+                        <p className="text-xs text-blue-600 dark:text-blue-300 uppercase font-bold mb-1">Pay to this Account:</p>
+                        <p className="text-xl font-black text-gray-800 dark:text-white flex items-center gap-2">
+                            <Landmark className="w-5 h-5" /> {BANK_DETAILS.bank}
+                        </p>
+                        <p className="text-2xl font-mono tracking-wider text-blue-600 dark:text-blue-400 my-1 selection:bg-blue-200">{BANK_DETAILS.number}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">{BANK_DETAILS.name}</p>
                     </div>
-                    <div className="flex gap-4">
-                        <div className="flex-1">
-                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Expiry</label>
-                            <input type="text" placeholder="MM/YY" className="w-full p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none" value={expiry} onChange={e => setExpiry(e.target.value)} />
+                )}
+
+                {/* CRYPTO MODE */}
+                {paymentMethod === 'crypto' && (
+                    <div className="space-y-4 text-center py-4">
+                        <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+                            <Wallet className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
                         </div>
-                        <div className="flex-1">
-                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">CVV</label>
+                        <p className="text-sm text-gray-600 dark:text-gray-300">
+                            Paying from wallet: <br/>
+                            <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs">{globalWallet?.address.substring(0,10)}...</code>
+                        </p>
+                        <p className="text-xs text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded-lg">
+                            Note: This is a simulated transaction. No real ETH deducted.
+                        </p>
+                    </div>
+                )}
+
+                {/* CARD MODE (Simulated) */}
+                {paymentMethod === 'card' && (
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Card Number</label>
                             <div className="relative">
-                                <Lock className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
-                                <input type="text" placeholder="123" className="w-full pl-10 p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none" value={cvv} onChange={e => setCvv(e.target.value)}/>
+                                <CreditCard className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                                <input 
+                                    type="text" 
+                                    placeholder="0000 0000 0000 0000" 
+                                    className="w-full pl-10 p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none"
+                                    value={cardNumber}
+                                    onChange={e => setCardNumber(e.target.value)}
+                                />
+                            </div>
+                        </div>
+                        <div className="flex gap-4">
+                            <div className="flex-1">
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Expiry</label>
+                                <input type="text" placeholder="MM/YY" className="w-full p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none" value={expiry} onChange={e => setExpiry(e.target.value)} />
+                            </div>
+                            <div className="flex-1">
+                                <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">CVV</label>
+                                <div className="relative">
+                                    <Lock className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
+                                    <input type="text" placeholder="123" className="w-full pl-10 p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none" value={cvv} onChange={e => setCvv(e.target.value)}/>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            ) : (
-                <div className="space-y-4 text-center py-4">
-                    <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-                        <Wallet className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
+                )}
+
+                {/* INPUT FIELDS (Address & Name) */}
+                <div className="space-y-3 pt-2">
+                    {paymentMethod === 'transfer' && (
+                        <div>
+                            <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Sender Name</label>
+                            <input 
+                                type="text" 
+                                placeholder="Name on Bank Account" 
+                                className="w-full p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                                value={transferName}
+                                onChange={e => setTransferName(e.target.value)}
+                            />
+                        </div>
+                    )}
+
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Delivery Address</label>
+                        <div className="relative">
+                            <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                            <input 
+                                type="text" 
+                                placeholder="Street, Area, City" 
+                                className="w-full pl-10 p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                                value={address}
+                                onChange={e => setAddress(e.target.value)}
+                            />
+                        </div>
                     </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-300">
-                        Paying from wallet: <br/>
-                        <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs">{globalWallet?.address.substring(0,10)}...</code>
-                    </p>
-                    <p className="text-xs text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded-lg">
-                        Note: This is a simulated transaction for the demo. No real ETH will be deducted.
-                    </p>
                 </div>
-            )}
+
+            </div>
 
             <button 
                 onClick={handlePayment}
-                disabled={processing || (paymentMethod === 'card' && !cardNumber)}
+                disabled={processing}
                 className={`w-full mt-8 py-4 rounded-xl font-bold text-white shadow-lg flex items-center justify-center gap-2 transition-all ${processing ? 'opacity-75 cursor-not-allowed' : ''} ${paymentMethod === 'crypto' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-green-600 hover:bg-green-700'}`}
             >
                 {processing ? (
@@ -599,7 +812,7 @@ const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globa
                     </>
                 ) : (
                     <>
-                        Pay ${total}
+                        {paymentMethod === 'transfer' ? 'I Have Sent the Money' : 'Confirm Order'}
                     </>
                 )}
             </button>
@@ -609,7 +822,7 @@ const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globa
 };
 
 const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeFromCart, cartTotal, globalWallet, user, setCart }) => {
-  const [paymentMethod, setPaymentMethod] = useState('card');
+  const [paymentMethod, setPaymentMethod] = useState('transfer'); // Default to Transfer
   const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   const initiateCheckout = () => {
@@ -622,7 +835,7 @@ const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeF
 
   const handleSuccess = () => {
       setShowPaymentModal(false);
-      alert("Order Confirmed! 🚀");
+      alert("Order Placed! Check 'Orders' tab for updates.");
       setCart([]);
       setCurrentView('orders');
   };
@@ -667,7 +880,7 @@ const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeF
                 <span className="text-2xl">{item.image}</span>
                 <div>
                   <div className="font-bold text-sm text-gray-900 dark:text-white">{item.name}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">${item.price.toFixed(2)}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">₦{item.price.toLocaleString()}</div>
                 </div>
               </div>
               <button onClick={() => removeFromCart(item.cartId)} className="text-red-400 hover:text-red-600 p-2 transition-colors">
@@ -680,17 +893,24 @@ const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeF
 
       <div className="p-6 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 space-y-4">
         
+        {/* Payment Method Selector */}
         {cart.length > 0 && (
             <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-xl flex">
                 <button 
+                    onClick={() => setPaymentMethod('transfer')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all ${paymentMethod === 'transfer' ? 'bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500'}`}
+                >
+                    <Landmark className="w-4 h-4" /> Transfer
+                </button>
+                <button 
                     onClick={() => setPaymentMethod('card')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${paymentMethod === 'card' ? 'bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500'}`}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all ${paymentMethod === 'card' ? 'bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white' : 'text-gray-500'}`}
                 >
                     <CreditCard className="w-4 h-4" /> Card
                 </button>
                 <button 
                     onClick={() => setPaymentMethod('crypto')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${paymentMethod === 'crypto' ? 'bg-indigo-500 shadow-sm text-white' : 'text-gray-500'}`}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all ${paymentMethod === 'crypto' ? 'bg-indigo-500 shadow-sm text-white' : 'text-gray-500'}`}
                 >
                     <Wallet className="w-4 h-4" /> Crypto
                 </button>
@@ -699,13 +919,13 @@ const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeF
 
         <div className="flex justify-between items-center">
           <span className="text-gray-600 dark:text-gray-400">Total</span>
-          <span className="text-3xl font-black text-gray-900 dark:text-white">${cartTotal}</span>
+          <span className="text-3xl font-black text-gray-900 dark:text-white">₦{cartTotal.toLocaleString()}</span>
         </div>
         <button 
             onClick={initiateCheckout}
             className={`w-full text-white font-bold py-4 rounded-xl transition-all shadow-lg flex justify-center ${paymentMethod === 'crypto' ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200' : 'bg-green-600 hover:bg-green-700 shadow-green-200'} dark:shadow-none`}
         >
-          {paymentMethod === 'crypto' ? 'Pay with Ethereum' : 'Checkout Securely'}
+          {paymentMethod === 'crypto' ? 'Pay with Ethereum' : 'Checkout'}
         </button>
       </div>
     </div>
@@ -726,6 +946,7 @@ export default function EatAi() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [globalWallet, setGlobalWallet] = useState(null);
+  
   const [marketData, setMarketData] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
 
@@ -736,6 +957,10 @@ export default function EatAi() {
   
   const [darkMode, setDarkMode] = useState(false);
   const [activeFilters, setActiveFilters] = useState([]);
+
+  // --- 🔒 SECURITY CHECK: LIST YOUR ADMIN EMAIL HERE 🔒 ---
+  const ADMIN_EMAILS = ["your-email@gmail.com", "partner@gmail.com"]; 
+  const isAdmin = user && ADMIN_EMAILS.includes(user.email);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -749,7 +974,6 @@ export default function EatAi() {
     return () => unsubscribe();
   }, []);
 
-  // LOAD PRODUCTS FROM DB
   useEffect(() => {
     const loadProducts = async () => {
       const products = await getAllProducts();
@@ -910,7 +1134,7 @@ export default function EatAi() {
           {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} />}
           {currentView === 'wallet' && <WalletView setCurrentView={setCurrentView} user={user} setGlobalWallet={setGlobalWallet} />}
           {currentView === 'orders' && <OrdersView setCurrentView={setCurrentView} user={user} />}
-          {currentView === 'admin' && (
+          {currentView === 'admin' && isAdmin && (
             <AdminView 
               setCurrentView={setCurrentView} 
               marketData={marketData} 
@@ -948,8 +1172,8 @@ export default function EatAi() {
           )}
         </main>
 
-        {/* ADMIN BUTTON (VISIBLE ON ALL SCREENS) */}
-        {currentView === 'home' && (
+        {/* ADMIN BUTTON: Only shows if user is in the ADMIN_EMAILS list */}
+        {currentView === 'home' && isAdmin && (
           <div className="fixed bottom-24 left-6 z-50">
              <button onClick={() => setCurrentView('admin')} className="bg-gray-900 text-white font-bold text-sm px-4 py-2 rounded-full shadow-xl flex items-center gap-2 hover:bg-gray-700 transition-colors border border-gray-700">
                <Database className="w-4 h-4" /> Manager Mode

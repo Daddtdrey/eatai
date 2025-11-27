@@ -1,12 +1,12 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
 import { 
-  getFirestore, doc, setDoc, getDoc, collection, addDoc, deleteDoc, updateDoc,
-  query, where, getDocs, writeBatch, increment, orderBy 
+  getFirestore, doc, setDoc, getDoc, collection, addDoc, deleteDoc, updateDoc, 
+  query, where, getDocs, writeBatch, increment 
 } from "firebase/firestore";
 
 // ------------------------------------------------------------------
-// 🔴 PASTE YOUR CONFIG HERE (Same as before)
+// 🔴 ACTION REQUIRED: PASTE YOUR FIREBASE CONFIG HERE
 // ------------------------------------------------------------------
 const firebaseConfig = {
   apiKey: "AIzaSyBm5DntiyXX5PCWnNsMybJIC9UetJvyrz8",
@@ -57,7 +57,6 @@ export const saveWalletToProfile = async (uid, address) => {
 };
 
 // --- ORDERS & STOCK ---
-
 const updateStockLevels = async (cart) => {
   const batch = writeBatch(db);
   cart.forEach((item) => {
@@ -67,7 +66,6 @@ const updateStockLevels = async (cart) => {
   await batch.commit();
 };
 
-// UPDATED: Create Order now accepts Address and Transfer Name
 export const createOrder = async (userId, cart, total, paymentMethod, walletAddress, address, transferName) => {
   try {
     const ordersRef = collection(db, "orders");
@@ -75,14 +73,13 @@ export const createOrder = async (userId, cart, total, paymentMethod, walletAddr
       userId,
       items: cart,
       total: parseFloat(total),
-      paymentMethod, // 'transfer', 'card', 'crypto'
+      paymentMethod,
       walletAddress: walletAddress || null,
       deliveryAddress: address,
       transferName: transferName || null,
-      status: 'pending', // pending -> confirmed -> delivered
+      status: 'pending',
       createdAt: new Date().toISOString()
     });
-
     await updateStockLevels(cart);
     return newOrder.id;
   } catch (e) {
@@ -91,7 +88,6 @@ export const createOrder = async (userId, cart, total, paymentMethod, walletAddr
   }
 };
 
-// Get Orders for a specific User
 export const getUserOrders = async (userId) => {
   try {
     const ordersRef = collection(db, "orders");
@@ -105,13 +101,9 @@ export const getUserOrders = async (userId) => {
   }
 };
 
-// NEW: Admin Get ALL Orders
 export const getAllOrders = async () => {
   try {
-    const ordersRef = collection(db, "orders");
-    // Ideally use orderBy('createdAt', 'desc') but requires an index. 
-    // We sort in JS to avoid index errors for now.
-    const querySnapshot = await getDocs(ordersRef); 
+    const querySnapshot = await getDocs(collection(db, "orders"));
     const orders = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     return orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   } catch (e) {
@@ -120,7 +112,6 @@ export const getAllOrders = async () => {
   }
 };
 
-// NEW: Admin Update Status (Confirm Order)
 export const updateOrderStatus = async (orderId, status) => {
   try {
     const orderRef = doc(db, "orders", orderId);
@@ -131,7 +122,7 @@ export const updateOrderStatus = async (orderId, status) => {
   }
 };
 
-// --- PRODUCTS ---
+// --- PRODUCTS & ADMIN ---
 
 export const getAllProducts = async () => {
   try {
@@ -153,6 +144,16 @@ export const addProduct = async (productData) => {
   }
 };
 
+export const updateProduct = async (productId, updatedData) => {
+  try {
+    const productRef = doc(db, "products", productId);
+    await updateDoc(productRef, updatedData);
+  } catch (e) {
+    console.error("Error updating product: ", e);
+    throw e;
+  }
+};
+
 export const deleteProduct = async (productId) => {
   try {
     await deleteDoc(doc(db, "products", productId));
@@ -165,13 +166,17 @@ export const deleteProduct = async (productId) => {
 export const seedDatabase = async () => {
   const MOCK_DATA = [
     { category: 'fullMeal', stock: 5, name: 'Jollof Rice Combo', price: 2500, image: '🍚', desc: 'Spicy rice with chicken & plantain', vendor: 'Mama Cass' },
-    { category: 'pregnancy', stock: 50, name: 'Pickles & Ice Cream', price: 1500, image: '🥒', desc: 'The classic combo', vendor: 'Cold Stone' },
+    { category: 'fullMeal', stock: 8, name: 'Grilled Salmon', price: 8000, image: '🐟', desc: 'Fresh salmon with quinoa', vendor: 'Ocean Basket' },
+    { category: 'pregnancy', stock: 20, name: 'Pickles & Ice Cream', price: 1500, image: '🥒', desc: 'The classic combo', vendor: 'Cold Stone' },
+    { category: 'fitness', stock: 15, name: 'Protein Shake', price: 3000, image: '🥤', desc: 'Whey protein boost', vendor: 'Gym Kitchen' }
   ];
+
   const batch = writeBatch(db);
   MOCK_DATA.forEach((item) => {
     const docRef = doc(collection(db, "products"));
     batch.set(docRef, item);
   });
+
   await batch.commit();
-  alert("Database Seeded!");
+  alert("Database Seeded! Refresh the page.");
 };

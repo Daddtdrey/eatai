@@ -4,12 +4,13 @@ import {
   ShoppingCart, Heart, Flame, Baby, Droplet, Plus, Minus, X,
   Moon, Sun, Leaf, Beef, Zap, Cookie, LogOut, User, Wallet, 
   Copy, Eye, EyeOff, CreditCard, Package, Clock, CheckCircle, 
-  Lock, Database, Trash2, Smile, Box, Landmark, MapPin, Truck, ShieldCheck
+  Lock, Database, Trash2, Smile, Box, Landmark, MapPin, Truck, 
+  ShieldCheck, Edit, Info, ChevronDown, ChevronUp, Dumbbell
 } from 'lucide-react';
 import { 
   auth, signInWithGoogle, logout, saveWalletToProfile, createOrder, 
   getUserOrders, getAllProducts, seedDatabase, addProduct, deleteProduct,
-  getAllOrders, updateOrderStatus
+  getAllOrders, updateOrderStatus, updateProduct
 } from './firebase'; 
 import { onAuthStateChanged } from 'firebase/auth';
 import { ethers } from 'ethers';
@@ -17,20 +18,22 @@ import { ethers } from 'ethers';
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 // --- 🔒 CONFIGURATION 🔒 ---
-const ADMIN_EMAILS = ["mannikdaniel@gmail.com", "ehijieizunyon28@gmail.com"]; 
-// ⚠️ Make sure these are all lowercase in the code!
 
+// 1. REPLACE WITH YOUR GMAIL ADDRESS(ES) - ALL LOWERCASE
+const ADMIN_EMAILS = ["mannikdaniel@gmail.com", "ehijieizunyon28@gmail.com"]; 
+
+// 2. REPLACE WITH YOUR BANK DETAILS
 const BANK_DETAILS = {
   bank: "OPay",
   number: "7060632004", 
-  name: "Izunyon Ehijie"
+  name: "EatAi Ventures"
 };
 
 // --- REUSABLE COMPONENTS ---
 
 const ViewContainer = ({ children, title, showBack, onBack }) => (
   <div className="p-6 max-w-2xl mx-auto h-full flex flex-col animate-fade-in">
-    <div className="flex items-center justify-between mb-6">
+    <div className="flex items-center justify-between mb-6 shrink-0">
       <div className="flex items-center">
         {showBack && (
           <button onClick={onBack} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full mr-2 transition-colors">
@@ -58,16 +61,87 @@ const DietaryFilter = ({ icon: Icon, label, active, onClick }) => (
   </button>
 );
 
+const ProductCard = ({ item, addToCart, isAdmin, onDelete, onEdit }) => {
+  const [showDesc, setShowDesc] = useState(false);
+
+  return (
+    <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 transition-all hover:shadow-md">
+      <div className="flex items-center gap-3">
+        <div className="w-16 h-16 bg-gray-50 dark:bg-gray-700 rounded-xl flex items-center justify-center text-3xl shrink-0 overflow-hidden">
+          {item.image}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex justify-between items-start">
+            <h4 className="font-bold text-gray-800 dark:text-white truncate pr-2">{item.name}</h4>
+            {isAdmin && (
+              <div className="flex gap-1">
+                <button onClick={() => onEdit(item)} className="p-1 text-blue-500 hover:bg-blue-50 rounded">
+                  <Edit className="w-4 h-4" />
+                </button>
+                <button onClick={() => onDelete(item.id)} className="p-1 text-red-500 hover:bg-red-50 rounded">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+          
+          <div className="flex items-center gap-2 mt-1">
+             <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded text-gray-500 dark:text-gray-300 font-bold truncate max-w-[100px]">{item.vendor}</span>
+             {(item.stock === 0) && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded font-bold">Sold Out</span>}
+             {(item.stock > 0 && item.stock < 5) && <span className="text-xs bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded font-bold">Low Stock</span>}
+          </div>
+
+          <div className="flex items-center justify-between mt-2">
+            <div className="text-orange-600 dark:text-orange-400 font-bold">₦{item.price.toLocaleString()}</div>
+            {!isAdmin && (
+              <button 
+                onClick={() => addToCart(item)}
+                disabled={item.stock === 0}
+                className={`p-2 rounded-lg transition-colors ${item.stock === 0 ? 'bg-gray-300 cursor-not-allowed' : 'bg-gray-900 dark:bg-orange-500 text-white hover:scale-105'}`}
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Description Toggle */}
+      <div className="mt-3 border-t border-gray-100 dark:border-gray-700 pt-2">
+        <button 
+          onClick={() => setShowDesc(!showDesc)} 
+          className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-orange-500 transition-colors w-full"
+        >
+          <Info className="w-3 h-3" />
+          {showDesc ? 'Hide Details' : 'View Details'}
+          {showDesc ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+        </button>
+        {showDesc && (
+          <div className="mt-2 text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg animate-fade-in">
+            {item.desc || "No description available."}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // --- VIEW COMPONENTS ---
 
 const AdminView = ({ setCurrentView, marketData, refreshData }) => {
   const [activeTab, setActiveTab] = useState('orders'); 
   const [adminOrders, setAdminOrders] = useState([]);
+  
+  // Edit State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editId, setEditId] = useState(null);
+  
   const [newItem, setNewItem] = useState({
     name: '', price: '', vendor: '', category: 'fullMeal', desc: '', stock: 10, image: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Load orders
   useEffect(() => {
     if (activeTab === 'orders') {
       const loadAdminOrders = async () => {
@@ -85,18 +159,51 @@ const AdminView = ({ setCurrentView, marketData, refreshData }) => {
     }
   };
 
+  // EDIT LOGIC
+  const handleEditClick = (item) => {
+    setNewItem({
+      name: item.name,
+      price: item.price,
+      vendor: item.vendor,
+      category: item.category,
+      desc: item.desc || '',
+      stock: item.stock || 0,
+      image: item.image
+    });
+    setEditId(item.id);
+    setIsEditing(true);
+    // Scroll to top of form
+    const form = document.getElementById('admin-form');
+    if(form) form.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditId(null);
+    setNewItem({ name: '', price: '', vendor: '', category: 'fullMeal', desc: '', stock: 10, image: '' });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
+    
     let imageIcon = newItem.image || '🍽️'; 
-    await addProduct({ 
+    const productPayload = { 
         ...newItem, 
         price: parseFloat(newItem.price), 
         stock: parseInt(newItem.stock),
         image: imageIcon
-    });
-    alert("Product Added!");
-    setNewItem({ name: '', price: '', vendor: '', category: 'fullMeal', desc: '', stock: 10, image: '' });
+    };
+
+    if (isEditing) {
+        await updateProduct(editId, productPayload);
+        alert("Product Updated!");
+    } else {
+        await addProduct(productPayload);
+        alert("Product Added!");
+    }
+    
+    handleCancelEdit();
     await refreshData();
     setIsSubmitting(false);
   };
@@ -110,7 +217,8 @@ const AdminView = ({ setCurrentView, marketData, refreshData }) => {
 
   return (
     <ViewContainer title="Manager HQ" showBack onBack={() => setCurrentView('home')}>
-      <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
+      
+      <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl shrink-0">
         <button 
             onClick={() => setActiveTab('orders')}
             className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors ${activeTab === 'orders' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}
@@ -125,122 +233,136 @@ const AdminView = ({ setCurrentView, marketData, refreshData }) => {
         </button>
       </div>
 
-      {activeTab === 'orders' && (
-        <div className="space-y-4 pb-24">
-            {adminOrders.length === 0 && <p className="text-center text-gray-400 mt-10">No orders found.</p>}
-            {adminOrders.map(order => (
-                <div key={order.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
-                    <div className="flex justify-between items-start mb-3">
-                        <div>
-                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${
-                                order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
-                                order.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 
-                                'bg-green-100 text-green-800'
-                            }`}>
-                                {order.status.toUpperCase()}
-                            </span>
-                            <p className="text-xs text-gray-400 mt-1">{new Date(order.createdAt).toLocaleString()}</p>
-                        </div>
-                        <div className="text-right">
-                            <p className="font-black text-lg dark:text-white">₦{order.total.toLocaleString()}</p>
-                            <p className="text-xs text-gray-500 uppercase">{order.paymentMethod}</p>
-                        </div>
-                    </div>
-                    {order.paymentMethod === 'transfer' && (
-                        <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg mb-2 border border-blue-100 dark:border-blue-800">
-                            <p className="text-xs text-blue-800 dark:text-blue-200">
-                                <strong>Sender:</strong> {order.transferName}
-                            </p>
-                        </div>
-                    )}
-                    <div className="bg-gray-50 dark:bg-gray-900/50 p-2 rounded-lg mb-2">
-                        <p className="text-xs text-gray-500 uppercase font-bold mb-1">Delivery To:</p>
-                        <p className="text-sm dark:text-gray-300 font-medium">{order.deliveryAddress}</p>
-                    </div>
-                    <div className="border-t dark:border-gray-700 pt-2 mb-4">
-                        {order.items.map((item, i) => (
-                            <div key={i} className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
-                                <span>1x {item.name} ({item.vendor})</span>
-                                <span>₦{item.price}</span>
+      {/* SCROLLABLE CONTENT AREA */}
+      <div className="flex-1 overflow-y-auto pb-32 scrollbar-hide">
+        {activeTab === 'orders' && (
+            <div className="space-y-4">
+                {adminOrders.length === 0 && <p className="text-center text-gray-400 mt-10">No orders found.</p>}
+                {adminOrders.map(order => (
+                    <div key={order.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                        <div className="flex justify-between items-start mb-3">
+                            <div>
+                                <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                                    order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
+                                    order.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 
+                                    'bg-green-100 text-green-800'
+                                }`}>
+                                    {order.status.toUpperCase()}
+                                </span>
+                                <p className="text-xs text-gray-400 mt-1">{new Date(order.createdAt).toLocaleString()}</p>
                             </div>
-                        ))}
+                            <div className="text-right">
+                                <p className="font-black text-lg dark:text-white">₦{order.total.toLocaleString()}</p>
+                                <p className="text-xs text-gray-500 uppercase">{order.paymentMethod}</p>
+                            </div>
+                        </div>
+                        
+                        {order.paymentMethod === 'transfer' && (
+                            <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg mb-2 border border-blue-100 dark:border-blue-800">
+                                <p className="text-xs text-blue-800 dark:text-blue-200">
+                                    <strong>Sender:</strong> {order.transferName}
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="bg-gray-50 dark:bg-gray-900/50 p-2 rounded-lg mb-2">
+                            <p className="text-xs text-gray-500 uppercase font-bold mb-1">Delivery To:</p>
+                            <p className="text-sm dark:text-gray-300 font-medium">{order.deliveryAddress}</p>
+                        </div>
+
+                        <div className="border-t dark:border-gray-700 pt-2 mb-4">
+                            {order.items.map((item, i) => (
+                                <div key={i} className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
+                                    <span>1x {item.name} ({item.vendor})</span>
+                                    <span>₦{item.price}</span>
+                                </div>
+                            ))}
+                        </div>
+
+                        {order.status === 'pending' && (
+                            <button onClick={() => handleStatusUpdate(order.id, 'confirmed')} className="w-full bg-green-600 text-white py-3 rounded-lg text-sm font-bold shadow hover:bg-green-700">
+                                Confirm Payment & Order
+                            </button>
+                        )}
+                        {order.status === 'confirmed' && (
+                            <button onClick={() => handleStatusUpdate(order.id, 'delivered')} className="w-full bg-gray-900 dark:bg-gray-700 text-white py-3 rounded-lg text-sm font-bold">
+                                Mark as Delivered
+                            </button>
+                        )}
                     </div>
-                    {order.status === 'pending' && (
-                        <button onClick={() => handleStatusUpdate(order.id, 'confirmed')} className="w-full bg-green-600 text-white py-3 rounded-lg text-sm font-bold shadow hover:bg-green-700">
-                            Confirm Payment & Order
-                        </button>
-                    )}
-                    {order.status === 'confirmed' && (
-                        <button onClick={() => handleStatusUpdate(order.id, 'delivered')} className="w-full bg-gray-900 dark:bg-gray-700 text-white py-3 rounded-lg text-sm font-bold">
-                            Mark as Delivered
-                        </button>
-                    )}
-                </div>
-            ))}
-        </div>
-      )}
+                ))}
+            </div>
+        )}
 
-      {activeTab === 'products' && (
-        <>
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 mb-8">
-            <h3 className="font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-              <Plus className="w-5 h-5 text-orange-500" /> Add New Item
-            </h3>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <input required placeholder="Name" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
-                  value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} />
-                <input required type="number" placeholder="Price (₦)" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
-                  value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <input required placeholder="Vendor" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
-                  value={newItem.vendor} onChange={e => setNewItem({...newItem, vendor: e.target.value})} />
-                <select className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full"
-                  value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>
-                  <option value="fullMeal">Full Meal</option>
-                  <option value="pregnancy">Pregnancy</option>
-                  <option value="period">Period</option>
-                  <option value="male">Male</option>
-                  <option value="normal">Normal</option>
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
-                    <Box className="w-5 h-5 text-gray-500" />
-                    <input required type="number" placeholder="Stock" className="bg-transparent border-none w-full outline-none dark:text-white" 
-                    value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
+        {activeTab === 'products' && (
+            <>
+            <div id="admin-form" className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 mb-8">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                    {isEditing ? <Edit className="w-5 h-5 text-blue-500" /> : <Plus className="w-5 h-5 text-orange-500" />} 
+                    {isEditing ? 'Edit Item' : 'Add New Item'}
+                    </h3>
+                    {isEditing && (
+                        <button onClick={handleCancelEdit} className="text-xs text-gray-500 hover:text-red-500 underline">Cancel</button>
+                    )}
                 </div>
-                <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
-                    <Smile className="w-5 h-5 text-gray-500" />
-                    <input placeholder="Emoji" className="bg-transparent border-none w-full outline-none dark:text-white" 
-                    value={newItem.image} onChange={e => setNewItem({...newItem, image: e.target.value})} />
-                </div>
-              </div>
-              <button disabled={isSubmitting} className="w-full bg-gray-900 dark:bg-orange-600 text-white font-bold py-3 rounded-xl">
-                {isSubmitting ? 'Saving...' : 'Save Item'}
-              </button>
-            </form>
-          </div>
 
-          <div className="space-y-3 pb-20">
-            {marketData.map(item => (
-              <div key={item.id} className="flex justify-between items-center bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{item.image}</span>
-                  <div>
-                    <p className="font-bold text-gray-800 dark:text-white text-sm">{item.name}</p>
-                    <p className="text-xs text-gray-500">₦{item.price.toLocaleString()} • Stock: {item.stock}</p>
-                  </div>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                    <input required placeholder="Name" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
+                    value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} />
+                    <input required type="number" placeholder="Price (₦)" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
+                    value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
                 </div>
-                <button onClick={() => handleDelete(item.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-full">
-                  <Trash2 className="w-5 h-5" />
+                <div className="grid grid-cols-2 gap-4">
+                    <input required placeholder="Vendor" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full" 
+                    value={newItem.vendor} onChange={e => setNewItem({...newItem, vendor: e.target.value})} />
+                    <select className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none w-full"
+                    value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>
+                    <option value="fullMeal">Full Meal</option>
+                    <option value="fitness">Fitness</option>
+                    <option value="pregnancy">Pregnancy</option>
+                    <option value="period">Period</option>
+                    <option value="male">Male</option>
+                    <option value="normal">Normal</option>
+                    </select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
+                        <Box className="w-5 h-5 text-gray-500" />
+                        <input required type="number" placeholder="Stock" className="bg-transparent border-none w-full outline-none dark:text-white" 
+                        value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
+                    </div>
+                    <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
+                        <Smile className="w-5 h-5 text-gray-500" />
+                        <input placeholder="Emoji" className="bg-transparent border-none w-full outline-none dark:text-white" 
+                        value={newItem.image} onChange={e => setNewItem({...newItem, image: e.target.value})} />
+                    </div>
+                </div>
+                
+                <textarea required placeholder="Description of item..." className="w-full p-3 rounded-xl bg-gray-50 dark:bg-gray-700 dark:text-white border-none h-20 resize-none" 
+                    value={newItem.desc} onChange={e => setNewItem({...newItem, desc: e.target.value})} />
+                
+                <button disabled={isSubmitting} className={`w-full text-white font-bold py-3 rounded-xl ${isEditing ? 'bg-blue-600' : 'bg-gray-900 dark:bg-orange-600'}`}>
+                    {isSubmitting ? 'Saving...' : (isEditing ? 'Update Item' : 'Save Item')}
                 </button>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+                </form>
+            </div>
+
+            <div className="space-y-3">
+                {marketData.map(item => (
+                <ProductCard 
+                    key={item.id} 
+                    item={item} 
+                    isAdmin={true}
+                    onEdit={handleEditClick}
+                    onDelete={handleDelete}
+                />
+                ))}
+            </div>
+            </>
+        )}
+      </div>
     </ViewContainer>
   );
 };
@@ -268,34 +390,36 @@ const OrdersView = ({ setCurrentView, user }) => {
           <p>No orders yet.</p>
         </div>
       ) : (
-        <div className="space-y-4 pb-24">
-          {orders.map(order => (
-            <div key={order.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-mono text-gray-400">#{order.id.slice(0, 8)}</span>
-                <span className={`text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 ${
-                    order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 
-                    order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' :
-                    'bg-green-100 text-green-700'
-                }`}>
-                  {order.status === 'pending' ? <Clock className="w-3 h-3" /> : 
-                   order.status === 'confirmed' ? <ShieldCheck className="w-3 h-3" /> :
-                   <CheckCircle className="w-3 h-3" />}
-                  {order.status.toUpperCase()}
-                </span>
-              </div>
-              <div className="flex justify-between items-end">
-                <div className="flex-1 mr-4">
-                  <p className="font-bold text-gray-800 dark:text-white">{order.items.length} Items</p>
-                  <p className="text-xs text-gray-500 truncate">{order.deliveryAddress}</p>
+        <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide">
+            <div className="space-y-4">
+            {orders.map(order => (
+                <div key={order.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+                <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-mono text-gray-400">#{order.id.slice(0, 8)}</span>
+                    <span className={`text-xs px-2 py-1 rounded-full font-bold flex items-center gap-1 ${
+                        order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 
+                        order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' :
+                        'bg-green-100 text-green-700'
+                    }`}>
+                    {order.status === 'pending' ? <Clock className="w-3 h-3" /> : 
+                    order.status === 'confirmed' ? <ShieldCheck className="w-3 h-3" /> :
+                    <CheckCircle className="w-3 h-3" />}
+                    {order.status.toUpperCase()}
+                    </span>
                 </div>
-                <div className="text-right">
-                   <p className="text-xs text-gray-400 capitalize">{order.paymentMethod}</p>
-                   <p className="text-xl font-black text-orange-500">₦{order.total.toLocaleString()}</p>
+                <div className="flex justify-between items-end">
+                    <div className="flex-1 mr-4">
+                    <p className="font-bold text-gray-800 dark:text-white">{order.items.length} Items</p>
+                    <p className="text-xs text-gray-500 truncate">{order.deliveryAddress}</p>
+                    </div>
+                    <div className="text-right">
+                    <p className="text-xs text-gray-400 capitalize">{order.paymentMethod}</p>
+                    <p className="text-xl font-black text-orange-500">₦{order.total.toLocaleString()}</p>
+                    </div>
                 </div>
-              </div>
+                </div>
+            ))}
             </div>
-          ))}
         </div>
       )}
     </ViewContainer>
@@ -437,7 +561,7 @@ const HomeView = ({ setCurrentView, user }) => (
           Welcome back, {user?.displayName?.split(' ')[0]}!
         </p>
         
-        {/* NEW: BIG ORDERS BUTTON FOR MOBILE VISIBILITY */}
+        {/* MOBILE ORDERS BUTTON */}
         <div className="grid grid-cols-1 gap-4 w-full max-w-md pt-4">
            <button 
               onClick={() => setCurrentView('orders')}
@@ -447,7 +571,6 @@ const HomeView = ({ setCurrentView, user }) => (
               View My Orders
            </button>
         </div>
-
       </div>
   
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-md">
@@ -472,7 +595,7 @@ const HomeView = ({ setCurrentView, user }) => (
         </button>
       </div>
     </div>
-  );
+);
 
 const DeciderView = ({ ingredients, setIngredients, generateRecipes, isThinking, aiRecipe, setCurrentView, activeFilters, toggleFilter }) => (
     <ViewContainer title="AI Fridge Raider" showBack onBack={() => setCurrentView('home')}>
@@ -516,16 +639,16 @@ const DeciderView = ({ ingredients, setIngredients, generateRecipes, isThinking,
         {aiRecipe && (
           <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-700 animate-slide-up whitespace-pre-wrap">
             <h3 className="text-xl font-bold text-orange-600 dark:text-orange-400 mb-4">Chef EatAi Suggests:</h3>
-            <div className="text-gray-700 dark:text-gray-300 leading-relaxed font-medium">
+            <div className="text-gray-700 dark:text-gray-300 leading-loose font-medium whitespace-pre-line">
               {aiRecipe}
             </div>
           </div>
         )}
       </div>
     </ViewContainer>
-  );
-  
-  const MarketView = ({ marketSection, setMarketSection, cravingsType, setCravingsType, setCurrentView, addToCart, marketData, loadingData }) => {
+);
+
+const MarketView = ({ marketSection, setMarketSection, cravingsType, setCravingsType, setCurrentView, addToCart, marketData, loadingData }) => {
     if (loadingData) {
       return <div className="flex justify-center items-center h-full"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div>;
     }
@@ -559,7 +682,10 @@ const DeciderView = ({ ingredients, setIngredients, generateRecipes, isThinking,
             </button>
   
             <button 
-              onClick={() => setMarketSection('cravings')}
+              onClick={() => {
+                setMarketSection('cravings');
+                setCravingsType(null); 
+              }}
               className="w-full h-40 relative overflow-hidden rounded-3xl bg-gradient-to-r from-purple-500 to-indigo-600 p-6 text-left shadow-lg transform transition hover:scale-[1.02]"
             >
               <div className="relative z-10 text-white">
@@ -579,6 +705,7 @@ const DeciderView = ({ ingredients, setIngredients, generateRecipes, isThinking,
         { id: 'period', label: 'Period', icon: Droplet, color: 'bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-200' },
         { id: 'normal', label: 'Normal', icon: Heart, color: 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-200' },
         { id: 'male', label: 'Male', icon: Flame, color: 'bg-slate-800 text-white dark:bg-slate-700' },
+        { id: 'fitness', label: 'Fitness', icon: Dumbbell, color: 'bg-emerald-800 text-white dark:bg-emerald-900' },
       ];
   
       return (
@@ -607,37 +734,27 @@ const DeciderView = ({ ingredients, setIngredients, generateRecipes, isThinking,
   
     return (
       <ViewContainer title={title} showBack onBack={() => marketSection === 'cravings' ? setCravingsType(null) : setMarketSection(null)}>
-        <div className="grid grid-cols-1 gap-4 overflow-y-auto pb-24 scrollbar-hide">
-          {products.map((item) => (
-            <div key={item.id} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center gap-4 animate-fade-in transition-colors">
-              <div className="w-20 h-20 bg-gray-50 dark:bg-gray-700 rounded-xl flex items-center justify-center text-4xl shrink-0 overflow-hidden">
-                {/* Render Emoji or Image URL */}
-                {item.image}
-              </div>
-              <div className="flex-1">
-                <h4 className="font-bold text-gray-800 dark:text-white">{item.name}</h4>
-                <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded text-gray-500 dark:text-gray-300 font-bold">{item.vendor}</span>
-                    {/* Stock Badge */}
-                    {(item.stock === 0) && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded font-bold">Sold Out</span>}
-                    {(item.stock > 0 && item.stock < 5) && <span className="text-xs bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded font-bold">Low Stock</span>}
-                </div>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">{item.desc}</p>
-                <div className="text-orange-600 dark:text-orange-400 font-bold">₦{item.price.toLocaleString()}</div>
-              </div>
-              <button 
-                onClick={() => addToCart(item)}
-                disabled={item.stock === 0}
-                className={`p-3 text-white rounded-xl transition-colors ${item.stock === 0 ? 'bg-gray-300 cursor-not-allowed' : 'bg-gray-900 dark:bg-orange-500 hover:bg-gray-700 dark:hover:bg-orange-600'}`}
-              >
-                <Plus className="w-5 h-5" />
-              </button>
+        {products.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                <Box className="w-16 h-16 mb-4 opacity-20" />
+                <p>No items found in this category yet.</p>
+                <p className="text-xs mt-2">Check back soon!</p>
             </div>
-          ))}
-        </div>
+        ) : (
+            <div className="grid grid-cols-1 gap-4 overflow-y-auto pb-24 scrollbar-hide">
+            {products.map((item) => (
+                <ProductCard 
+                key={item.id} 
+                item={item} 
+                addToCart={addToCart} 
+                isAdmin={false}
+                />
+            ))}
+            </div>
+        )}
       </ViewContainer>
     );
-  };
+};
 
 const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess }) => {
   if (!isOpen) return null;
@@ -650,7 +767,6 @@ const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globa
   const [cvv, setCvv] = useState('');
 
   const handlePayment = async () => {
-    // Simple Validation
     if (paymentMethod === 'transfer' && (!transferName || !address)) {
         alert("Please fill in all fields");
         return;
@@ -665,8 +781,6 @@ const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globa
     }
 
     setProcessing(true);
-    
-    // Simulate slight delay
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     if (paymentMethod === 'crypto') {
@@ -694,10 +808,8 @@ const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globa
                 <p className="text-gray-500 text-sm">Total Amount: <span className="font-bold text-orange-500">₦{total.toLocaleString()}</span></p>
             </div>
 
-            {/* PAYMENT FORMS */}
             <div className="space-y-4">
                 
-                {/* TRANSFER MODE */}
                 {paymentMethod === 'transfer' && (
                     <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl mb-4 border border-blue-100 dark:border-blue-800">
                         <p className="text-xs text-blue-600 dark:text-blue-300 uppercase font-bold mb-1">Pay to this Account:</p>
@@ -709,7 +821,6 @@ const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globa
                     </div>
                 )}
 
-                {/* CRYPTO MODE */}
                 {paymentMethod === 'crypto' && (
                     <div className="space-y-4 text-center py-4">
                         <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
@@ -725,7 +836,6 @@ const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globa
                     </div>
                 )}
 
-                {/* CARD MODE (Simulated) */}
                 {paymentMethod === 'card' && (
                     <div className="space-y-4">
                         <div>
@@ -757,7 +867,6 @@ const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globa
                     </div>
                 )}
 
-                {/* INPUT FIELDS (Address & Name) */}
                 <div className="space-y-3 pt-2">
                     {paymentMethod === 'transfer' && (
                         <div>
@@ -811,7 +920,7 @@ const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globa
 };
 
 const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeFromCart, cartTotal, globalWallet, user, setCart }) => {
-  const [paymentMethod, setPaymentMethod] = useState('transfer'); // Default to Transfer
+  const [paymentMethod, setPaymentMethod] = useState('transfer');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   const initiateCheckout = () => {
@@ -882,7 +991,6 @@ const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeF
 
       <div className="p-6 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 space-y-4">
         
-        {/* Payment Method Selector */}
         {cart.length > 0 && (
             <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-xl flex">
                 <button 
@@ -926,7 +1034,7 @@ const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeF
 // --- MAIN APP COMPONENT ---
 
 export default function EatAi() {
-  const [currentView, setCurrentView] = useState('home'); 
+  const [currentView, setCurrentView] = useState(localStorage.getItem('eatai_view') || 'home');
   const [ingredients, setIngredients] = useState('');
   const [aiRecipe, setAiRecipe] = useState(null);
   const [isThinking, setIsThinking] = useState(false);
@@ -952,6 +1060,10 @@ export default function EatAi() {
   // Force lowercase comparison for safety
   const currentEmail = user?.email?.toLowerCase();
   const isAdmin = user && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(currentEmail);
+
+  useEffect(() => {
+    localStorage.setItem('eatai_view', currentView);
+  }, [currentView]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -1000,124 +1112,45 @@ export default function EatAi() {
       ? `Important Dietary Rules: The user follows these diets: ${activeFilters.join(', ')}. Ensure all recipes strictly adhere to this.` 
       : '';
 
-    const systemPrompt = `You are a world-class chef. The user will give you a list of ingredients they have. 
-    Suggest 2 distinct, creative, and delicious recipes they can make. 
-    ${dietString}
-    Format the output clearly with a Title, Ingredients list, and Instructions.
-    Keep the tone encouraging and fun. Use emojis.`;
-    
-    const userQuery = `I have these ingredients: ${ingredients}`;
-
+    const systemPrompt = `You are a world-class chef. Format structure:\n\n🥘 RECIPE TITLE\n\n🥕 INGREDIENTS:\n• Item\n• Item\n\n👩‍🍳 INSTRUCTIONS:\n1. Step...\n2. Step...\n\n${dietString}\nDo not use markdown symbols like ** or ##. Do not use // separators. Use clean spacing.`;
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: userQuery }] }],
-            systemInstruction: { parts: [{ text: systemPrompt }] }
-          }),
-        }
-      );
-
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: `I have these ingredients: ${ingredients}` }] }], systemInstruction: { parts: [{ text: systemPrompt }] } }) });
       if (!response.ok) throw new Error('API Failed');
-
       const result = await response.json();
-      const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-      setAiRecipe(text);
-    } catch (error) {
-      setAiRecipe("Oops! My chef brain is a bit scrambled. Please try again later. 🍳");
-      console.error(error);
-    } finally {
-      setIsThinking(false);
-    }
+      setAiRecipe(result.candidates?.[0]?.content?.parts?.[0]?.text);
+    } catch (error) { setAiRecipe("Oops! My chef brain is a bit scrambled. Please try again later. 🍳"); } finally { setIsThinking(false); }
   };
 
   const addToCart = (item) => setCart([...cart, { ...item, cartId: Date.now() }]);
   const removeFromCart = (cartId) => setCart(cart.filter(item => item.cartId !== cartId));
   const cartTotal = cart.reduce((sum, item) => sum + item.price, 0).toFixed(2);
 
-  if (authLoading) {
-    return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900"><div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div></div>;
-  }
-
-  if (!user) {
-    return (
-      <div className={darkMode ? "dark" : ""}>
-        <div className="bg-gray-50 dark:bg-gray-950 min-h-screen font-sans transition-colors duration-300">
-           <div className="flex justify-end p-4">
-              <button onClick={toggleDarkMode} className="p-2 rounded-full text-gray-600 dark:text-yellow-400">
-                {darkMode ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}
-              </button>
-           </div>
-           <LoginView />
-        </div>
-      </div>
-    );
-  }
+  if (authLoading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900"><div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div></div>;
+  if (!user) return <div className={darkMode ? "dark" : ""}><div className="bg-gray-50 dark:bg-gray-950 min-h-screen font-sans transition-colors duration-300"><div className="flex justify-end p-4"><button onClick={toggleDarkMode} className="p-2 rounded-full text-gray-600 dark:text-yellow-400">{darkMode ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}</button></div><LoginView /></div></div>;
 
   return (
     <div className={darkMode ? "dark" : ""}>
       <div className="bg-gray-50 dark:bg-gray-950 min-h-screen font-sans text-gray-900 dark:text-white relative overflow-hidden transition-colors duration-300">
-        
-        <CartOverlay 
-          cart={cart} 
-          setCart={setCart}
-          currentView={currentView} 
-          setCurrentView={setCurrentView} 
-          marketSection={marketSection} 
-          removeFromCart={removeFromCart} 
-          cartTotal={Number(cartTotal)}
-          globalWallet={globalWallet}
-          user={user}
-        />
+        <CartOverlay cart={cart} setCart={setCart} currentView={currentView} setCurrentView={setCurrentView} marketSection={marketSection} removeFromCart={removeFromCart} cartTotal={Number(cartTotal)} globalWallet={globalWallet} user={user} />
 
         <header className="hidden md:flex items-center justify-between px-8 py-4 bg-white dark:bg-gray-900 shadow-sm sticky top-0 z-40 transition-colors">
           <div className="text-2xl font-black text-orange-500 cursor-pointer" onClick={() => setCurrentView('home')}>EatAi</div>
           <div className="flex items-center space-x-6">
-            <button onClick={() => setCurrentView('decider')} className="hover:text-orange-500 dark:text-gray-300 dark:hover:text-orange-400 font-medium transition-colors">AI Chef</button>
-            <button onClick={() => setCurrentView('market')} className="hover:text-orange-500 dark:text-gray-300 dark:hover:text-orange-400 font-medium transition-colors">Market</button>
-            <button onClick={() => setCurrentView('orders')} className="hover:text-orange-500 dark:text-gray-300 dark:hover:text-orange-400 font-medium transition-colors">Orders</button>
-            <button onClick={() => setCurrentView('wallet')} className="hover:text-orange-500 dark:text-gray-300 dark:hover:text-orange-400 font-medium transition-colors">Crypto</button>
-            
-            <button onClick={toggleDarkMode} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors text-gray-600 dark:text-yellow-400">
-              {darkMode ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}
-            </button>
-
-            <button onClick={() => setCurrentView('cart')} className="relative p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
-              <ShoppingCart className="w-6 h-6 text-gray-700 dark:text-white" />
-              {cart.length > 0 && (
-                <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-xs flex items-center justify-center rounded-full font-bold">
-                  {cart.length}
-                </span>
-              )}
-            </button>
-
-            <div className="flex items-center gap-3 pl-4 border-l border-gray-200 dark:border-gray-700">
-              {user.photoURL ? (
-                 <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full border border-gray-300" />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-orange-200 flex items-center justify-center text-orange-800 font-bold">
-                  {user.displayName?.[0] || 'U'}
-                </div>
-              )}
-              <button onClick={logout} className="text-sm text-gray-500 hover:text-red-500 transition-colors">
-                <LogOut className="w-5 h-5" />
-              </button>
-            </div>
+            <button onClick={() => setCurrentView('decider')} className="hover:text-orange-500 dark:text-gray-300 font-medium">AI Chef</button>
+            <button onClick={() => setCurrentView('market')} className="hover:text-orange-500 dark:text-gray-300 font-medium">Market</button>
+            <button onClick={() => setCurrentView('orders')} className="hover:text-orange-500 dark:text-gray-300 font-medium">Orders</button>
+            <button onClick={() => setCurrentView('wallet')} className="hover:text-orange-500 dark:text-gray-300 font-medium">Crypto</button>
+            <button onClick={toggleDarkMode} className="p-2 rounded-full text-gray-600 dark:text-yellow-400">{darkMode ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}</button>
+            <button onClick={() => setCurrentView('cart')} className="relative p-2 rounded-full"><ShoppingCart className="w-6 h-6" />{cart.length > 0 && <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-xs flex items-center justify-center rounded-full font-bold">{cart.length}</span>}</button>
+            <div className="flex items-center gap-3 pl-4 border-l border-gray-200 dark:border-gray-700">{user.photoURL ? <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full" /> : <div className="w-8 h-8 rounded-full bg-orange-200 flex items-center justify-center text-orange-800 font-bold">{user.displayName?.[0] || 'U'}</div>}<button onClick={logout}><LogOut className="w-5 h-5 text-gray-500 hover:text-red-500" /></button></div>
           </div>
         </header>
 
         <div className="md:hidden flex justify-between items-center px-6 py-4 bg-white dark:bg-gray-900 sticky top-0 z-30 shadow-sm">
            <div className="text-xl font-black text-orange-500" onClick={() => setCurrentView('home')}>EatAi</div>
            <div className="flex items-center gap-3">
-             <button onClick={toggleDarkMode} className="p-2 rounded-full text-gray-600 dark:text-yellow-400">
-                {darkMode ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}
-             </button>
-             <button onClick={logout}>
-                <LogOut className="w-6 h-6 text-gray-500" />
-             </button>
+             <button onClick={toggleDarkMode} className="p-2 rounded-full text-gray-600 dark:text-yellow-400">{darkMode ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}</button>
+             <button onClick={logout}><LogOut className="w-6 h-6 text-gray-500" /></button>
            </div>
         </div>
 
@@ -1125,92 +1158,26 @@ export default function EatAi() {
           {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} />}
           {currentView === 'wallet' && <WalletView setCurrentView={setCurrentView} user={user} setGlobalWallet={setGlobalWallet} />}
           {currentView === 'orders' && <OrdersView setCurrentView={setCurrentView} user={user} />}
-          {currentView === 'admin' && isAdmin && (
-            <AdminView 
-              setCurrentView={setCurrentView} 
-              marketData={marketData} 
-              refreshData={async () => {
-                 const products = await getAllProducts();
-                 setMarketData(products);
-              }} 
-            />
-          )}
-          
-          {currentView === 'decider' && (
-            <DeciderView 
-              ingredients={ingredients}
-              setIngredients={setIngredients}
-              generateRecipes={generateRecipes}
-              isThinking={isThinking}
-              aiRecipe={aiRecipe}
-              setCurrentView={setCurrentView}
-              activeFilters={activeFilters}
-              toggleFilter={toggleFilter}
-            />
-          )}
-
-          {currentView === 'market' && (
-            <MarketView 
-              marketSection={marketSection}
-              setMarketSection={setMarketSection}
-              cravingsType={cravingsType}
-              setCravingsType={setCravingsType}
-              setCurrentView={setCurrentView}
-              addToCart={addToCart}
-              marketData={marketData}
-              loadingData={loadingData}
-            />
-          )}
+          {currentView === 'admin' && isAdmin && (<AdminView setCurrentView={setCurrentView} marketData={marketData} refreshData={async () => { const products = await getAllProducts(); setMarketData(products); }} />)}
+          {currentView === 'decider' && (<DeciderView ingredients={ingredients} setIngredients={setIngredients} generateRecipes={generateRecipes} isThinking={isThinking} aiRecipe={aiRecipe} setCurrentView={setCurrentView} activeFilters={activeFilters} toggleFilter={toggleFilter} />)}
+          {currentView === 'market' && (<MarketView marketSection={marketSection} setMarketSection={setMarketSection} cravingsType={cravingsType} setCravingsType={setCravingsType} setCurrentView={setCurrentView} addToCart={addToCart} marketData={marketData} loadingData={loadingData} />)}
         </main>
 
-        {/* ADMIN BUTTON: Only shows if user is in the ADMIN_EMAILS list */}
         {currentView === 'home' && isAdmin && (
           <div className="fixed bottom-24 left-6 z-50">
-             <button onClick={() => setCurrentView('admin')} className="bg-gray-900 text-white font-bold text-sm px-4 py-2 rounded-full shadow-xl flex items-center gap-2 hover:bg-gray-700 transition-colors border border-gray-700">
-               <Database className="w-4 h-4" /> Manager Mode
-             </button>
+             <button onClick={() => setCurrentView('admin')} className="bg-gray-900 text-white font-bold text-sm px-4 py-2 rounded-full shadow-xl flex items-center gap-2 hover:bg-gray-700 transition-colors border border-gray-700"><Database className="w-4 h-4" /> Manager Mode</button>
           </div>
         )}
 
         <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 px-6 py-4 flex justify-around items-center md:hidden z-40 safe-area-pb transition-colors">
-          <button onClick={() => setCurrentView('home')} className={`flex flex-col items-center space-y-1 ${currentView === 'home' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}>
-            <Home className="w-6 h-6" />
-            <span className="text-xs font-medium">Home</span>
-          </button>
-          <button onClick={() => setCurrentView('wallet')} className={`flex flex-col items-center space-y-1 ${currentView === 'wallet' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}>
-            <Wallet className="w-6 h-6" />
-            <span className="text-xs font-medium">Crypto</span>
-          </button>
-          <button onClick={() => setCurrentView('decider')} className={`flex flex-col items-center space-y-1 ${currentView === 'decider' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}>
-            <ChefHat className="w-6 h-6" />
-            <span className="text-xs font-medium">Chef</span>
-          </button>
-          <button onClick={() => setCurrentView('market')} className={`flex flex-col items-center space-y-1 ${currentView === 'market' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}>
-            <Search className="w-6 h-6" />
-            <span className="text-xs font-medium">Market</span>
-          </button>
-          <button onClick={() => setCurrentView('cart')} className="flex flex-col items-center space-y-1 text-gray-400 dark:text-gray-500 relative">
-            {cart.length > 0 && (
-              <span className="absolute -top-1 right-0 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full">
-                {cart.length}
-              </span>
-            )}
-            <ShoppingCart className="w-6 h-6" />
-            <span className="text-xs font-medium">Cart</span>
-          </button>
+          <button onClick={() => setCurrentView('home')} className={`flex flex-col items-center space-y-1 ${currentView === 'home' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Home className="w-6 h-6" /><span className="text-xs font-medium">Home</span></button>
+          <button onClick={() => setCurrentView('wallet')} className={`flex flex-col items-center space-y-1 ${currentView === 'wallet' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Wallet className="w-6 h-6" /><span className="text-xs font-medium">Crypto</span></button>
+          <button onClick={() => setCurrentView('decider')} className={`flex flex-col items-center space-y-1 ${currentView === 'decider' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><ChefHat className="w-6 h-6" /><span className="text-xs font-medium">Chef</span></button>
+          <button onClick={() => setCurrentView('market')} className={`flex flex-col items-center space-y-1 ${currentView === 'market' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Search className="w-6 h-6" /><span className="text-xs font-medium">Market</span></button>
+          <button onClick={() => setCurrentView('cart')} className="flex flex-col items-center space-y-1 text-gray-400 dark:text-gray-500 relative">{cart.length > 0 && <span className="absolute -top-1 right-0 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full">{cart.length}</span>}<ShoppingCart className="w-6 h-6" /><span className="text-xs font-medium">Cart</span></button>
         </nav>
 
-        <style>{`
-          .safe-area-pb { padding-bottom: env(safe-area-inset-bottom); }
-          .scrollbar-hide::-webkit-scrollbar { display: none; }
-          .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-          @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-          @keyframes bounce { 0%, 100% { transform: translateY(-5%); } 50% { transform: translateY(0); } }
-          @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-          .animate-fade-in { animation: fadeIn 0.5s ease-out; }
-          .animate-slide-up { animation: slideUp 0.5s ease-out; }
-          .animate-bounce { animation: bounce 2s infinite; }
-        `}</style>
+        <style>{`.safe-area-pb { padding-bottom: env(safe-area-inset-bottom); } .scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; } @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } } @keyframes bounce { 0%, 100% { transform: translateY(-5%); } 50% { transform: translateY(0); } } @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } } .animate-fade-in { animation: fadeIn 0.5s ease-out; } .animate-slide-up { animation: slideUp 0.5s ease-out; } .animate-bounce { animation: bounce 2s infinite; }`}</style>
       </div>
     </div>
   );

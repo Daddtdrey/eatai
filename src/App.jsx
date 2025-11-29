@@ -18,8 +18,8 @@ import { ethers } from 'ethers';
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 // --- 🔒 CONFIGURATION 🔒 ---
-const ADMIN_EMAILS = ["your-email@gmail.com", "partner@gmail.com"]; 
-const BANK_DETAILS = { bank: "OPay", number: "8012345678", name: "EatAi Ventures" };
+const ADMIN_EMAILS = ["mannikdaniel@gmail.com", "ehijieizunyon28@gmail.com"]; 
+const BANK_DETAILS = { bank: "OPay", number: "7060632004", name: "EatAi Ventures" };
 const LOCATIONS = ["Irrua", "Ekpoma", "Uromi"];
 
 // --- HELPERS ---

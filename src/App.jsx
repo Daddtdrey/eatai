@@ -17,7 +17,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { ethers } from 'ethers';
 
 // --- 🔒 CONFIGURATION 🔒 ---
-const PAYSTACK_KEY = "pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; // REPLACE WITH YOUR KEY
+const PAYSTACK_KEY = "pk_live_e26a023051d0eb34273cc6f86ccbf0e26ebbfdb9"; // REPLACE WITH YOUR KEY
 const SUPER_ADMINS = ["mannikdaniel@gmail.com"]; // REPLACE WITH YOUR EMAIL
 const LOGISTICS_EMAILS = ["kayscourierlogistics@gmail.com"]; 
 

@@ -11,10 +11,12 @@ import {
 import { 
   auth, signInWithGoogle, logout, saveWalletToProfile, createOrder, 
   getUserOrders, getAllProducts, seedDatabase, addProduct, deleteProduct,
-  getAllOrders, updateOrderStatus, updateProduct, db, collection, onSnapshot, query, where, orderBy, uploadImage, saveVendorLogo
+  getAllOrders, updateOrderStatus, updateProduct, db, collection, onSnapshot, query, where, orderBy, uploadImage, saveVendorLogo, getVendorLogos
 } from './firebase'; 
 import { onAuthStateChanged } from 'firebase/auth';
 import { ethers } from 'ethers';
+
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 // --- 🔒 CONFIGURATION 🔒 ---
 const PAYSTACK_KEY = "pk_live_e26a023051d0eb34273cc6f86ccbf0e26ebbfdb9"; // REPLACE WITH YOUR KEY
@@ -34,12 +36,12 @@ const SUB_ADMINS = {
 
 const BANK_DETAILS = { bank: "OPay", number: "8012345678", name: "EatAi Ventures" };
 const LOCATIONS = ["Irrua", "Ekpoma", "Uromi"];
+
 const VENDORS_BY_LOCATION = {
     "Irrua": ["NASCO", "NAISHAT", "OBest", "Phattie Chop Box"],
     "Ekpoma": ["Yummy You", "Big Taste", "Affluence"],
     "Uromi": ["Big Joe", "Uromi Grill"]
 };
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 const calculateDeliveryFee = (origin, destination) => {
     if (!destination) return 0;
@@ -51,13 +53,13 @@ const calculateDeliveryFee = (origin, destination) => {
 
 // --- UI COMPONENTS ---
 
-const Toast = ({ message }) => {
+const Toast = ({ message, type = 'success' }) => {
   if (!message) return null;
   return (
-    <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[100] animate-bounce transition-all duration-300 pointer-events-none">
-      <div className="bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border border-gray-700">
-        <div className="bg-green-500 rounded-full p-1">
-            <CheckCircle className="w-4 h-4 text-white" />
+    <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-[100] animate-bounce transition-all duration-300 pointer-events-none">
+      <div className={`px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border border-gray-700 ${type === 'alert' ? 'bg-orange-600 text-white' : 'bg-gray-900 text-white'}`}>
+        <div className={`rounded-full p-1 ${type === 'alert' ? 'bg-white/20' : 'bg-green-500'}`}>
+            {type === 'alert' ? <Bell className="w-4 h-4 text-white" /> : <CheckCircle className="w-4 h-4 text-white" />}
         </div>
         <span className="font-bold text-sm">{message}</span>
       </div>
@@ -77,7 +79,10 @@ const ViewContainer = ({ children, title, showBack, onBack }) => (
         <h2 className="text-2xl font-bold text-gray-800 dark:text-white">{title}</h2>
       </div>
     </div>
-    {children}
+    {/* FIXED: This wrapper ensures the content inside can scroll properly without squishing */}
+    <div className="flex-1 min-h-0 flex flex-col relative">
+        {children}
+    </div>
   </div>
 );
 
@@ -91,30 +96,69 @@ const ProductCard = ({ item, addToCart, isAdmin, onDelete, onEdit }) => {
   const [showDesc, setShowDesc] = useState(false);
   return (
     <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 transition-all hover:shadow-md overflow-hidden">
-      <div className="flex items-center gap-3">
-        <div className="w-20 h-20 bg-gray-50 dark:bg-gray-700 rounded-xl flex items-center justify-center text-3xl shrink-0 overflow-hidden relative">
+      <div className="flex items-start gap-4">
+        {/* IMAGE: Fixed Size */}
+        <div className="w-24 h-24 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center text-3xl shrink-0 overflow-hidden relative border border-gray-100 dark:border-gray-600">
             {item.imageUrl ? (
                 <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
             ) : (
                 <span>{item.image || '🍽️'}</span>
             )}
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex justify-between items-start">
-            <h4 className="font-bold text-gray-800 dark:text-white truncate pr-2 text-sm">{item.name}</h4>
-            {isAdmin && <div className="flex gap-1"><button onClick={() => onEdit(item)} className="p-1 text-blue-500 hover:bg-blue-50 rounded"><Edit className="w-4 h-4" /></button><button onClick={() => onDelete(item.id)} className="p-1 text-red-500 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button></div>}
+        
+        {/* CONTENT: Flexible Height */}
+        <div className="flex-1 min-w-0 flex flex-col justify-between min-h-[6rem]">
+          <div>
+            <h4 className="font-bold text-gray-900 dark:text-white text-base leading-snug line-clamp-2">{item.name}</h4>
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+                 <span className="text-[10px] uppercase font-bold tracking-wider bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 px-2 py-0.5 rounded">{item.vendor}</span>
+                 {item.stock < 5 && item.stock > 0 && <span className="text-[10px] text-orange-500 font-bold">Low Stock</span>}
+                 {item.stock === 0 && <span className="text-[10px] text-red-500 font-bold">Sold Out</span>}
+            </div>
           </div>
-          <div className="flex items-center gap-2 mt-1"><span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded text-gray-500 dark:text-gray-300 font-bold truncate max-w-[100px]">{item.vendor}</span><span className="text-[10px] border border-orange-200 text-orange-600 px-1.5 rounded">{item.location || 'HQ'}</span></div>
-          <div className="flex items-center gap-2 mt-1">{(item.stock === 0) && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded font-bold">Sold Out</span>}{(item.stock > 0 && item.stock < 5) && <span className="text-xs bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded font-bold">Low Stock</span>}</div>
-          <div className="flex items-center justify-between mt-2"><div className="text-orange-600 dark:text-orange-400 font-bold">₦{item.price.toLocaleString()}</div>{!isAdmin && <button onClick={() => addToCart(item)} disabled={item.stock === 0} className={`p-2 rounded-lg transition-colors ${item.stock === 0 ? 'bg-gray-300 cursor-not-allowed' : 'bg-gray-900 dark:bg-orange-500 text-white hover:scale-105'}`}><Plus className="w-4 h-4" /></button>}</div>
+
+          <div className="flex items-center justify-between mt-2">
+            <div className="text-orange-600 dark:text-orange-400 font-black text-lg">₦{item.price.toLocaleString()}</div>
+            
+            {isAdmin ? (
+                <div className="flex gap-2">
+                    <button onClick={() => onEdit(item)} className="p-2 text-blue-600 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 rounded-lg"><Edit className="w-4 h-4" /></button>
+                    <button onClick={() => onDelete(item.id)} className="p-2 text-red-600 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+                </div>
+            ) : (
+                <button 
+                    onClick={() => addToCart(item)} 
+                    disabled={item.stock === 0} 
+                    className={`p-2 px-4 rounded-xl transition-all shadow-sm active:scale-95 flex items-center justify-center ${item.stock === 0 ? 'bg-gray-300 cursor-not-allowed' : 'bg-gray-900 dark:bg-white text-white dark:text-gray-900'}`}
+                >
+                    <Plus className="w-5 h-5" />
+                </button>
+            )}
+          </div>
         </div>
       </div>
-      <div className="mt-3 border-t border-gray-100 dark:border-gray-700 pt-2"><button onClick={() => setShowDesc(!showDesc)} className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-orange-500 transition-colors w-full"><Info className="w-3 h-3" />{showDesc ? 'Hide Details' : 'View Details'}{showDesc ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}</button>{showDesc && <div className="mt-2 text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg animate-fade-in">{item.desc || "No description available."}</div>}</div>
+
+      {/* DETAILS TOGGLE */}
+      <div className="mt-3 border-t border-dashed border-gray-200 dark:border-gray-700 pt-2">
+        <button 
+          onClick={() => setShowDesc(!showDesc)} 
+          className="flex items-center justify-between w-full text-xs font-bold text-gray-500 dark:text-gray-400 hover:text-orange-500 transition-colors py-1"
+        >
+          <span className="flex items-center gap-1"><Info className="w-3 h-3" /> {showDesc ? 'Hide Details' : 'View Details'}</span>
+          {showDesc ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        </button>
+        
+        {showDesc && (
+          <div className="mt-2 text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-700/30 p-3 rounded-lg animate-fade-in leading-relaxed">
+            {item.desc || "No additional description available for this item."}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
 
-// --- SCREENS ---
+// --- SCREEN COMPONENTS ---
 
 const LoginView = () => (
     <div className="flex flex-col items-center justify-center h-full p-6 text-center animate-fade-in">
@@ -141,13 +185,26 @@ const LocationSelectionView = ({ setCity, setCurrentView }) => (
     </ViewContainer>
 );
 
-const VendorSelectionView = ({ city, setVendor, setCurrentView }) => {
+const VendorSelectionView = ({ city, setVendor, setCurrentView, vendorLogos }) => {
     const vendors = VENDORS_BY_LOCATION[city] || [];
     return (
         <ViewContainer title={`${city} Vendors`} showBack onBack={() => setCurrentView('location')}>
             <div className="grid grid-cols-1 gap-4 mt-4">
                 {vendors.map((vendor) => (
-                    <button key={vendor} onClick={() => { setVendor(vendor); setCurrentView('market'); }} className="p-6 rounded-2xl bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 flex items-center justify-between hover:border-orange-500 transition-all shadow-sm"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-orange-100 dark:bg-gray-700 rounded-full flex items-center justify-center text-orange-600"><Store className="w-6 h-6" /></div><div className="text-left"><h3 className="text-xl font-bold text-gray-800 dark:text-white">{vendor}</h3><p className="text-sm text-gray-500 dark:text-gray-400">Tap to see menu</p></div></div><ArrowLeft className="w-5 h-5 text-gray-400 rotate-180" /></button>
+                    <button key={vendor} onClick={() => { setVendor(vendor); setCurrentView('market'); }} className="p-6 rounded-2xl bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 flex items-center justify-between hover:border-orange-500 transition-all shadow-sm">
+                        <div className="flex items-center gap-4">
+                            {/* LOGO: Smart Fallback Logic */}
+                            <div className="w-16 h-16 rounded-full flex items-center justify-center overflow-hidden bg-orange-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600">
+                                {vendorLogos && vendorLogos[vendor] ? (
+                                    <img src={vendorLogos[vendor]} alt={vendor} className="w-full h-full object-cover" />
+                                ) : (
+                                    <Store className="w-8 h-8 text-orange-600" />
+                                )}
+                            </div>
+                            <div className="text-left"><h3 className="text-xl font-bold text-gray-800 dark:text-white">{vendor}</h3><p className="text-sm text-gray-500 dark:text-gray-400">Tap to see menu</p></div>
+                        </div>
+                        <ArrowLeft className="w-5 h-5 text-gray-400 rotate-180" />
+                    </button>
                 ))}
                 {vendors.length === 0 && <p className="text-center text-gray-500 mt-10">No vendors registered in this city yet.</p>}
             </div>
@@ -184,7 +241,7 @@ const LogisticsView = ({ setCurrentView, user, setNotification }) => {
         <ViewContainer title="Logistics Hub" showBack onBack={() => setCurrentView('home')}>
              <div className="flex gap-2 mb-4 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl shrink-0"><button onClick={() => setViewMode('active')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors ${viewMode === 'active' ? 'bg-white dark:bg-gray-700 shadow text-purple-600' : 'text-gray-500'}`}>Active ({activeTasks.length})</button><button onClick={() => setViewMode('history')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors ${viewMode === 'history' ? 'bg-white dark:bg-gray-700 shadow text-purple-600' : 'text-gray-500'}`}>History</button></div>
             {loading ? <div className="flex justify-center p-10"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full" /></div> : (
-                <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide space-y-4">
+                <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide space-y-4 min-h-0">
                     {displayedTasks.length === 0 && <p className="text-center text-gray-500 mt-10">No {viewMode} deliveries.</p>}
                     {displayedTasks.map(task => (
                         <div key={task.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
@@ -210,7 +267,10 @@ const MarketView = ({ setCurrentView, addToCart, marketData, loadingData, city, 
     return (
         <ViewContainer title={`${vendor} Menu`} showBack onBack={() => setCurrentView('vendors')}>
             <div className="flex gap-2 overflow-x-auto pb-2 mb-4 scrollbar-hide">{categories.map(cat => (<DietaryFilter key={cat.id} icon={cat.icon} label={cat.label} active={category === cat.id} onClick={() => setCategory(cat.id)} />))}</div>
-            {items.length === 0 ? <div className="flex flex-col items-center justify-center h-64 text-gray-400"><Box className="w-16 h-16 mb-4 opacity-20" /><p>No items found.</p><p className="text-xs text-orange-500 mt-2">Tip: Add items in Manager Mode</p></div> : <div className="grid grid-cols-1 gap-4 overflow-y-auto pb-24 scrollbar-hide">{items.map((item) => (<ProductCard key={item.id} item={item} addToCart={addToCart} isAdmin={false} />))}</div>}
+            {/* FIXED: Added min-h-0 and overflow-y-auto to this container so it scrolls independently */}
+            <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide min-h-0">
+                {items.length === 0 ? <div className="flex flex-col items-center justify-center h-64 text-gray-400"><Box className="w-16 h-16 mb-4 opacity-20" /><p>No items found.</p><p className="text-xs text-orange-500 mt-2">Tip: Add items in Manager Mode</p></div> : <div className="grid grid-cols-1 gap-4">{items.map((item) => (<ProductCard key={item.id} item={item} addToCart={addToCart} isAdmin={false} />))}</div>}
+            </div>
         </ViewContainer>
     );
 };
@@ -286,7 +346,9 @@ const AdminView = ({ setCurrentView, marketData, refreshData, user, setNotificat
           )}
       </div>
       <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl shrink-0"><button onClick={() => setActiveTab('products')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors ${activeTab === 'products' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}>Inventory</button>{(isSuperAdmin || myVendorName) && <button onClick={() => setActiveTab('orders')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors ${activeTab === 'orders' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}>Orders</button>}</div>
-      <div className="flex-1 overflow-y-auto pb-32 scrollbar-hide">
+      
+      {/* FIXED: ENSURES SCROLLING IN ADMIN VIEW */}
+      <div className="flex-1 overflow-y-auto pb-32 scrollbar-hide min-h-0">
         {activeTab === 'orders' && (
             <div className="space-y-4">{adminOrders.length === 0 ? <p className="text-center text-gray-400 mt-10">No orders found.</p> : adminOrders.map(order => (<div key={order.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm"><div className="flex justify-between items-start mb-3"><div><span className={`text-xs font-bold px-2 py-1 rounded-full ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>{order.status.toUpperCase()}</span><p className="text-xs text-gray-400 mt-1">{new Date(order.createdAt).toLocaleString()}</p></div><div className="text-right"><p className="font-black text-lg dark:text-white">₦{order.total.toLocaleString()}</p><p className="text-xs text-gray-500 uppercase">{order.paymentMethod}</p></div></div>{order.paymentMethod === 'transfer' && (<div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg mb-2 border border-blue-100 dark:border-blue-800"><p className="text-xs text-blue-800 dark:text-blue-200"><strong>Sender:</strong> {order.transferName}</p></div>)}<div className="bg-gray-50 dark:bg-gray-900/50 p-2 rounded-lg mb-2"><p className="text-xs text-gray-500 uppercase font-bold mb-1">Delivery To:</p><p className="text-sm dark:text-gray-300 font-medium">{order.deliveryAddress}</p><p className="text-xs text-gray-500 mt-1">📞 {order.phone} | 🏛️ {order.landmark}</p></div><div className="text-xs text-gray-400 text-right mb-2">Fee: ₦{order.deliveryFee} included</div>{order.status === 'pending' && (<button onClick={() => handleStatusUpdate(order.id, 'confirmed')} className="w-full bg-green-600 text-white py-3 rounded-lg text-sm font-bold shadow hover:bg-green-700">Confirm Payment</button>)}{order.status === 'confirmed' && (<button onClick={() => handleStatusUpdate(order.id, 'delivered')} className="w-full bg-gray-900 dark:bg-gray-700 text-white py-3 rounded-lg text-sm font-bold">Mark Delivered</button>)}</div>))}</div>
         )}
@@ -438,6 +500,7 @@ const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globa
 
   const handlePayment = async (method = paymentMethod) => {
     if (!form.address || !form.phone || !form.deliveryArea) return alert("Delivery details required");
+    // Manual transfer check removed since button is removed
     setProcessing(true);
     if (method !== 'paystack') await new Promise(r => setTimeout(r, 1500));
     try {

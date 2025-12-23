@@ -7,56 +7,58 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png'], // Removed broken SVGs
-      manifest: {
-        name: 'EatAi Food Delivery',
-        short_name: 'EatAi',
-        description: 'Order food from Nasco, Big Joe, and top vendors in Irrua, Ekpoma, and Uromi.',
-        theme_color: '#ffffff',
-        background_color: '#ffffff',
-        display: 'standalone',
-        orientation: 'portrait',
-        start_url: '/',
-        icons: [
+      injectRegister: 'auto',
+      manifest: false, // We use the manual manifest.json in /public for iOS compatibility
+      workbox: {
+        // 🟢 CACHE STRATEGY: Cache these file types instantly
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,json}'],
+        
+        // 🟢 RUNTIME CACHING: Cache fonts and images from the web
+        runtimeCaching: [
           {
-            src: 'pwa-192x192.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'any maskable'
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-cache',
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 60 * 60 * 24 * 365 // 1 Year
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
           },
           {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any maskable'
-          }
-        ],
-        screenshots: [
-            {
-              src: 'screenshot-mobile.png',
-              sizes: '1080x1920',
-              type: 'image/png',
-              form_factor: 'narrow',
-              label: 'Home Screen'
-            },
-            {
-              src: 'screenshot-desktop.png',
-              sizes: '1920x1080',
-              type: 'image/png',
-              form_factor: 'wide',
-              label: 'Desktop View'
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'gstatic-fonts-cache',
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 60 * 60 * 24 * 365 // 1 Year
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
             }
-          ]
+          }
+        ]
       }
     })
   ],
+  server: {
+    host: true, // Allows access from network (for testing on phone)
+    allowedHosts: true // Allows ngrok/tunneling
+  },
   build: {
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
+        // Optimizes code splitting for faster load times
         manualChunks: {
           vendor: ['react', 'react-dom'],
-          firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+          firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/messaging'],
           utils: ['ethers', 'lucide-react', 'react-paystack']
         }
       }

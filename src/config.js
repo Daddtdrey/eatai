@@ -1,37 +1,61 @@
 export const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-export const PAYSTACK_KEY = "pk_live_e26a023051d0eb34273cc6f86ccbf0e26ebbfdb9"; // 🔴 REPLACE THIS WITH YOUR KEY
-export const VAPID_KEY = "BAutBdOnduVyCzRm2gyCLjAss8h6PSfPslMoF9BUsNfTmxUZD079QCD3ZoEb6Dixzyjdq91aS3YlwFm_iA_OicI"; 
-// 2. ROLES & EMAILS
-export const SUPER_ADMINS = ["mannikdaniel@gmail.com"]; // 🔴 REPLACE THIS WITH YOUR EMAIL
-export const LOGISTICS_EMAILS = ["ehijieizunyon28@gmail.com, kayscourierlogistics@gmail.com"];
 
+// 🔴 REPLACE THIS WITH YOUR PAYSTACK PUBLIC KEY
+export const PAYSTACK_KEY = "pk_live_e26a023051d0eb34273cc6f86ccbf0e26ebbfdb9"; 
+
+// 🔴 REPLACE THIS WITH YOUR FIREBASE VAPID KEY (Cloud Messaging -> Web Config)
+export const VAPID_KEY = "PASTE_YOUR_LONG_KEY_HERE"; 
+
+// 2. ROLES & EMAILS
+export const SUPER_ADMINS = ["mannikdaniel@gmail.com"]; 
+export const LOGISTICS_EMAILS = ["driver@gmail.com"]; 
+
+// FALLBACK SUB-ADMINS (If DB fails)
 export const SUB_ADMINS = {
-    "dreytwitte@gmail.com": "NASCO",
-    "dreytwitter@gmail.com": "NAISHAT",
-    "favourobehi20@gmail.com": "OBest",
-    "amapataze@gmail.com": "Phattie Chop Box",
-    "yummy.manager@gmail.com": "Yummy You",
-    "bigtaste.manager@gmail.com": "Phattie Chop Box",
-    "affluence.manager@gmail.com": "Affluence",
-    "bigjoe.manager@gmail.com": "Big Joe"
+    "nasco.manager@gmail.com": "NASCO",
 };
+
+export const BANK_DETAILS = { bank: "OPay", number: "8012345678", name: "EatAi Ventures" };
 
 // 3. LOCATIONS & VENDORS
 export const LOCATIONS = ["Irrua", "Ekpoma", "Uromi"];
 
-// DEFAULT VENDORS (Fallback if DB is empty)
+// DEFAULT VENDORS (Fallback)
 export const VENDORS_BY_LOCATION = {
     "Irrua": ["NASCO", "NAISHAT", "OBest", "Phattie Chop Box"],
     "Ekpoma": ["Yummy You", "Big Taste", "Affluence"],
     "Uromi": ["Big Joe", "Uromi Grill"]
 };
 
-// 🟢 FIXED: DELIVERY LOGIC
-export const calculateDeliveryFee = (origin, destination) => {
-    if (!origin || !destination) return 0;
+// 📍 GEOMAPPING COORDINATES (Lat/Lng)
+export const TOWN_COORDINATES = {
+    "Irrua": { lat: 6.7380, lng: 6.2185 },
+    "Ekpoma": { lat: 6.7420, lng: 6.1399 },
+    "Uromi": { lat: 6.7111, lng: 6.3263 }
+};
+
+// 📏 DISTANCE CALCULATOR (Haversine Formula)
+const getDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371; // Radius of the earth in km
+    const dLat = deg2rad(lat2 - lat1);
+    const dLon = deg2rad(lon2 - lon1);
+    const a = 
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2); 
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+    const d = R * c; 
+    return d;
+}
+
+const deg2rad = (deg) => {
+  return deg * (Math.PI/180);
+}
+
+// 🚚 DYNAMIC PRICING LOGIC
+export const calculateDeliveryFee = (originName, destination) => {
+    if (!originName || !destination) return 0;
     
-    // Normalize strings to avoid case sensitivity issues
-    const from = origin.trim();
+    const from = originName.trim();
     const to = destination.trim();
 
     // 1. WITHIN SAME TOWN (₦1,000)
@@ -43,7 +67,6 @@ export const calculateDeliveryFee = (origin, destination) => {
     }
 
     // 3. ANY <-> UROMI (₦3,000)
-    // (Except Uromi to Uromi which is caught by rule #1)
     if (from === 'Uromi' || to === 'Uromi') {
         return 3000;
     }

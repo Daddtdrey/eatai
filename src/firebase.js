@@ -1,5 +1,4 @@
 import { initializeApp } from "firebase/app";
-// 🟢 NEW: Added email auth imports
 import { 
     getAuth, 
     GoogleAuthProvider, 
@@ -16,6 +15,7 @@ import {
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { VAPID_KEY } from "./config.js";
+
 
 
 // 🔴 PASTE YOUR FIREBASE CONFIG HERE 🔴
@@ -39,9 +39,10 @@ export const db = getFirestore(app);
 export const storage = getStorage(app);
 export const messaging = getMessaging(app);
 
-// --- AUTH HANDLERS ---
+// ==========================================
+// 1. AUTHENTICATION
+// ==========================================
 
-// 1. Google Login
 export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
@@ -58,42 +59,36 @@ export const signInWithGoogle = async () => {
   } catch (error) { console.error("Error signing in", error); }
 };
 
-// 2. 🟢 NEW: Email Sign Up
 export const signUpWithEmail = async (email, password, name) => {
   try {
     const result = await createUserWithEmailAndPassword(auth, email, password);
-    // Update the Profile Display Name
     await updateProfile(result.user, { displayName: name });
-    
-    // Save to Database
     await setDoc(doc(db, "users", result.user.uid), {
       email: email,
       name: name,
       createdAt: new Date().toISOString()
     });
-    
     return result.user;
-  } catch (error) {
-    throw error; // Pass error to UI
-  }
+  } catch (error) { throw error; }
 };
 
-// 3. 🟢 NEW: Email Login
 export const logInWithEmail = async (email, password) => {
   try {
     const result = await signInWithEmailAndPassword(auth, email, password);
     return result.user;
-  } catch (error) {
-    throw error;
-  }
+  } catch (error) { throw error; }
 };
 
 export const logout = async () => { await signOut(auth); };
 
-// --- ADMIN & DATA LOGIC ---
+// ==========================================
+// 2. USER & ADMIN DATA
+// ==========================================
+
 export const getAdminRole = async (email) => {
     if (!email) return null;
     try {
+        // Method 1: Check by Doc ID
         const docRef = doc(db, "admins", email);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
@@ -103,6 +98,7 @@ export const getAdminRole = async (email) => {
                 vendor: data.vendor || data.vendorName 
             };
         }
+        // Method 2: Check by email field
         const q = query(collection(db, "admins"), where("email", "==", email));
         const snapshot = await getDocs(q);
         if (!snapshot.empty) {
@@ -137,7 +133,10 @@ export const saveWalletToProfile = async (uid, address) => {
   } catch (e) { console.error(e); }
 };
 
-// --- IMAGE UPLOAD ---
+// ==========================================
+// 3. IMAGES & VENDORS
+// ==========================================
+
 export const uploadImage = async (file) => {
   if (!file) return null;
   const formData = new FormData();
@@ -165,7 +164,6 @@ export const getVendorLogos = async () => {
     } catch(e) { return {}; }
 };
 
-// 🟢 NEW: SMART VENDOR FETCHING
 export const getGlobalVendors = async () => {
     try {
         const q = query(collection(db, "vendors"));
@@ -182,7 +180,9 @@ export const getGlobalVendors = async () => {
                 else if (!Array.isArray(rawLocs)) {
                     rawLocs = [rawLocs || "Irrua"];
                 }
+                
                 const locations = rawLocs.map(l => l.charAt(0).toUpperCase() + l.slice(1).toLowerCase());
+                
                 locations.forEach(loc => {
                     if (!vendorsByLocation[loc]) vendorsByLocation[loc] = [];
                     if (!vendorsByLocation[loc].includes(doc.id)) {
@@ -198,16 +198,21 @@ export const getGlobalVendors = async () => {
     }
 };
 
-// --- ORDER LOGIC ---
+// ==========================================
+// 4. ORDERS & PRODUCTS
+// ==========================================
+
 export const createOrder = async (userId, cart, total, paymentMethod, walletAddress, address, transferName, phone, landmark, deliveryFee, status = 'pending') => {
   try {
     await runTransaction(db, async (transaction) => {
+      // 1. Group items
       const itemCounts = {};
       cart.forEach(item => {
           itemCounts[item.id] = (itemCounts[item.id] || 0) + 1;
       });
 
       const updates = []; 
+      // 2. Read
       for (const [productId, quantity] of Object.entries(itemCounts)) {
         const productRef = doc(db, "products", productId);
         const productDoc = await transaction.get(productRef);
@@ -220,24 +225,17 @@ export const createOrder = async (userId, cart, total, paymentMethod, walletAddr
         updates.push({ ref: productRef, newStock: currentStock - quantity });
       }
 
+      // 3. Write
       updates.forEach(update => {
           transaction.update(update.ref, { stock: update.newStock });
       });
 
       const newOrderRef = doc(collection(db, "orders"));
       transaction.set(newOrderRef, {
-        userId, 
-        items: cart, 
-        total: parseFloat(total), 
-        paymentMethod, 
-        walletAddress: walletAddress || null, 
-        deliveryAddress: address, 
-        phone, 
-        landmark, 
-        deliveryFee, 
-        transferName: transferName || null,
-        status: status, 
-        createdAt: new Date().toISOString()
+        userId, items: cart, total: parseFloat(total), paymentMethod, 
+        walletAddress: walletAddress || null, deliveryAddress: address, 
+        phone, landmark, deliveryFee, transferName: transferName || null,
+        status: status, createdAt: new Date().toISOString()
       });
     });
   } catch (e) { 
@@ -283,13 +281,14 @@ export const deleteProduct = async (productId) => {
   await deleteDoc(doc(db, "products", productId));
 };
 
-export { collection, query, where, onSnapshot, orderBy };
+// ==========================================
+// 5. NOTIFICATIONS & ALERTS
+// ==========================================
 
-export const seedDatabase = async () => { console.log("Seeding available."); };
-
-// --- NOTIFICATION ---
 export const requestNotificationPermission = async (userId, role, vendorName) => {
   try {
+    if (!('Notification' in window)) return alert("Notifications not supported on this device.");
+    
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
       const token = await getToken(messaging, { vapidKey: VAPID_KEY }); 
@@ -303,12 +302,41 @@ export const requestNotificationPermission = async (userId, role, vendorName) =>
           if ((role === 'sub' || role === 'vendor') && vendorName) {
              await setDoc(doc(db, "notifications", vendorName), { token: token, email: userId }, { merge: true });
           }
+          alert("Success! Alerts enabled.");
       }
       return token;
+    } else {
+        alert("Notifications denied. Check browser settings.");
     }
-  } catch (error) { console.error(error); }
+  } catch (error) { console.error("Notification Error:", error); }
 };
 
 export const onMessageListener = () => new Promise((resolve) => { 
     onMessage(messaging, (payload) => { resolve(payload); }); 
 });
+
+// 🟢 NEW: SAVE STOCK REQUEST (Back in Stock Notification)
+export const saveStockRequest = async (item, userId, userEmail) => {
+    try {
+        await addDoc(collection(db, "stock_requests"), {
+            productId: item.id,
+            productName: item.name,
+            vendor: item.vendor,
+            userId: userId,
+            userEmail: userEmail || "Anonymous",
+            createdAt: new Date().toISOString(),
+            status: "pending"
+        });
+        return true;
+    } catch (e) {
+        console.error("Error saving stock request:", e);
+        return false;
+    }
+};
+
+// ==========================================
+// 6. EXPORTS
+// ==========================================
+
+export { collection, query, where, onSnapshot, orderBy };
+export const seedDatabase = async () => { console.log("Seeding available."); };

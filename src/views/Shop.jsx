@@ -3,19 +3,19 @@ import {
   ChefHat, ShoppingBag, Package, Store, ArrowLeft, LogIn, 
   ShoppingCart, CreditCard, Wallet, MapPin, Leaf, Beef, Zap, Cookie, 
   X, Minus, Sparkles, Box, Bell, Heart, Flame, Baby, Dumbbell, Plus, Eye,
-  Mail, Lock, User, Search, Home, Navigation, ChevronDown, Percent, Trash2, BellRing
+  Mail, Lock, User, Search, Home, Navigation, ChevronDown, Percent, Trash2, BellRing, CheckCircle
 } from 'lucide-react';
 import { PaystackButton } from 'react-paystack';
 import { ethers } from 'ethers';
 
-// 🟢 IMPORTS
-import { ViewContainer, DietaryFilter, ProductCard, OrderDetailModal, Toast } from '../components/UI';
+// 🟢 IMPORTS: Added explicit extensions (.jsx, .js) to fix build errors
+import { ViewContainer, DietaryFilter, ProductCard, OrderDetailModal, Toast } from '../components/UI.jsx';
 import { 
     signInWithGoogle, createOrder, getUserOrders, saveUserProfile, getUserProfile, 
     db, collection, onSnapshot, query, where, saveWalletToProfile, requestNotificationPermission,
     signUpWithEmail, logInWithEmail, saveStockRequest
-} from '../firebase';
-import { LOCATIONS, VENDORS_BY_LOCATION, PAYSTACK_KEY, BANK_DETAILS, calculateDeliveryFee, GEMINI_API_KEY } from '../config';
+} from '../firebase.js';
+import { LOCATIONS, VENDORS_BY_LOCATION, PAYSTACK_KEY, BANK_DETAILS, calculateDeliveryFee, GEMINI_API_KEY } from '../config.js';
 
 // --- 1. LOGIN VIEW ---
 export const LoginView = () => {
@@ -43,7 +43,7 @@ export const LoginView = () => {
                  <div className="w-24 h-24 bg-orange-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-6 mx-auto animate-bounce shadow-orange-200 dark:shadow-none shadow-lg">
                     <ChefHat className="w-12 h-12 text-orange-500" />
                  </div>
-                 <h1 className="text-4xl font-black text-gray-900 dark:text-white mb-2 tracking-tight font-[Fredoka]">EatAi</h1>
+                 <h1 className="text-4xl font-black text-gray-800 dark:text-white mb-2 tracking-tight font-[Fredoka]">EatAi</h1>
                  <p className="text-gray-500 dark:text-gray-400 mb-8 font-medium">Smart Food Delivery</p>
 
                  <form onSubmit={handleSubmit} className="space-y-4 mb-6">
@@ -89,7 +89,7 @@ export const LoginView = () => {
     );
 };
 
-// --- 2. 🟢 PREMIUM HOME VIEW ---
+// --- 2. HOME VIEW ---
 export const HomeView = ({ setCurrentView, user }) => {
     const [hasPermission, setHasPermission] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -105,12 +105,12 @@ export const HomeView = ({ setCurrentView, user }) => {
         if (token) setHasPermission(true);
     };
 
-    // Mock Data for Top Vendors (Will filter real data later if needed)
+    // Mock Data for Top Vendors
     const allTopVendors = [
-        { name: 'Nasco', img: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?q=80&w=200&auto=format&fit=crop', tags: 'Rice • Pasta' },
-        { name: 'Big Joe', img: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?q=80&w=200&auto=format&fit=crop', tags: 'Grill • Chicken' },
-        { name: 'Phattie Chop', img: 'https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?q=80&w=200&auto=format&fit=crop', tags: 'food' },
-        { name: 'Yummy You', img: 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?q=80&w=200&auto=format&fit=crop', tags: 'Snacks' }
+        { name: 'Nasco', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1766439247/p6wripeyb1nf5k4r9vkd.jpg', tags: 'Rice • Pasta' },
+        { name: 'Big Joe', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767036560/crack_burgers_--removebg-preview_wguehg.png', tags: 'Grill • Chicken' },
+        { name: 'Phattie Chop', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1766433503/Screenshot_2025-12-22_115720_jgc2vy.png', tags: 'full meal' },
+        { name: 'Yummy You', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767032932/Nigerian_Jollof_rice__fried_plantains_and_chicken_-removebg-preview_jthyvl.png', tags: 'Snacks' }
     ];
 
     // Search Logic
@@ -138,7 +138,7 @@ export const HomeView = ({ setCurrentView, user }) => {
                     </div>
                 </div>
 
-                {/* 🟢 REAL SEARCH BAR */}
+                {/* SEARCH BAR */}
                 <div className="w-full bg-gray-100 dark:bg-gray-800 p-3.5 rounded-2xl flex items-center gap-3 text-gray-400 focus-within:ring-2 focus-within:ring-orange-500 transition-all">
                     <Search className="w-5 h-5 text-gray-400" />
                     <input 
@@ -153,24 +153,22 @@ export const HomeView = ({ setCurrentView, user }) => {
 
             <div className="p-6 space-y-6">
                 
-                {/* 🟢 HERO BANNER (Light Orange, No "Free Delivery") */}
-                <div className="relative w-full h-48 bg-orange-400 rounded-[2rem] overflow-hidden shadow-xl shadow-orange-500/20 flex items-center group cursor-pointer" onClick={() => setCurrentView('location')}>
+                {/* HERO BANNER */}
+                <div className="relative w-full h-60 bg-gradient-to-r from-orange-500 to-red-600 rounded-[2.5rem] overflow-hidden shadow-xl shadow-orange-500/30 flex items-center group cursor-pointer transition-transform active:scale-[0.99]" onClick={() => setCurrentView('location')}>
                     <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
                     
-                    <div className="relative z-10 pl-6 w-1/2">
-                        <h2 className="text-3xl font-black text-white leading-tight mb-2 font-[Fredoka]">Hungry? <br/>Eat Now.</h2>
-                        <span className="text-white/90 text-xs font-bold flex items-center gap-1 bg-white/20 w-fit px-3 py-1 rounded-full backdrop-blur-sm border border-white/20">
-                            Order Food <ArrowLeft className="w-3 h-3 rotate-180"/>
-                        </span>
+                    <div className="relative z-10 pl-8 w-1/2 flex flex-col justify-center h-full">
+                        <span className="bg-white/20 backdrop-blur-md text-white text-[10px] font-black px-3 py-1 rounded-full mb-3 inline-block w-fit tracking-wide border border-white/10">FAST DELIVERY ⚡</span>
+                        <h2 className="text-4xl font-black text-white leading-none mb-3 font-[Fredoka] drop-shadow-md">Hungry?<br/><span className="text-orange-100 text-3xl">Eat Now.</span></h2>
+                        <span className="text-white/90 text-xs font-bold flex items-center gap-2 group-hover:text-orange-100 transition-colors">Order Food <div className="bg-white text-orange-600 rounded-full p-1 shadow-sm"><ArrowLeft className="w-3 h-3 rotate-180"/></div></span>
                     </div>
 
-                    {/* Food Collage */}
-                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1764867460/cld-sample-4.jpg" className="absolute -right-4 -bottom-2 w-36 h-36 object-contain drop-shadow-2xl transform group-hover:scale-110 transition-transform duration-500 z-20" alt="Burger" />
-                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1765286979/vef0v6ioqmbdrjdkfzws.jpg" className="absolute right-24 top-4 w-16 h-16 object-contain opacity-50 rotate-12 z-10" alt="Pizza" />
+                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767032932/Nigerian_Jollof_rice__fried_plantains_and_chicken_-removebg-preview_jthyvl.png" className="absolute -right-10 -bottom-8 w-64 h-64 object-contain drop-shadow-2xl transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 z-20" alt="Burger" />
+                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767032931/West_African_Dish__spicyfood__foodisland-removebg-preview_vv0hpf.png" className="absolute right-36 top-6 w-24 h-24 object-contain opacity-90 rotate-12 z-10 blur-[1px]" alt="Pizza" />
+                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767041008/These_Bold_Burger_Bowls_are_the_ultimate_low-carb_-removebg-preview_kjodwx.png" className="absolute right-48 -bottom-8 w-28 h-28 object-contain opacity-70 -rotate-12 z-10" alt="Drink" />
                 </div>
 
-                {/* 🟢 TOP VENDORS LIST */}
-                <div>
+                     <div>
                     <div className="flex justify-between items-center mb-3">
                         <h3 className="text-gray-900 dark:text-white font-bold text-lg font-[Fredoka]">Top Vendors</h3>
                         {!searchQuery && <span onClick={() => setCurrentView('vendors')} className="text-orange-500 text-xs font-bold cursor-pointer hover:underline">See all</span>}
@@ -179,20 +177,15 @@ export const HomeView = ({ setCurrentView, user }) => {
                     <div className={`flex ${searchQuery ? 'flex-col gap-3' : 'gap-4 overflow-x-auto scrollbar-hide pb-4 -mx-5 px-5'}`}>
                          {filteredVendors.map((vendor, i) => (
                              <div key={i} onClick={() => setCurrentView('vendors')} className={`bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl overflow-hidden shadow-sm active:scale-95 transition-transform cursor-pointer group ${searchQuery ? 'flex flex-row items-center p-2 gap-3' : 'min-w-[200px] flex-col'}`}>
-                                 
-                                 {/* Image */}
                                  <div className={`${searchQuery ? 'w-16 h-16 rounded-xl' : 'h-28 w-full'} bg-gray-200 dark:bg-gray-800 relative overflow-hidden`}>
-                                     <img src={vendor.img} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={vendor.name} />
+                                     <img src={vendor.img} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={vendor.name} onError={(e) => {e.target.style.display='none'; e.target.parentElement.style.backgroundColor='#eee'}} />
                                  </div>
-                                 
-                                 {/* Info */}
                                  <div className="p-3">
                                      <h4 className="font-black text-gray-800 dark:text-white text-sm font-[Fredoka]">{vendor.name}</h4>
                                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">{vendor.tags}</p>
                                  </div>
                              </div>
                          ))}
-                         
                          {filteredVendors.length === 0 && (
                              <p className="text-center text-gray-400 text-sm py-4">No vendors found matching "{searchQuery}"</p>
                          )}
@@ -215,7 +208,6 @@ export const HomeView = ({ setCurrentView, user }) => {
                             <div className="bg-white dark:bg-purple-600 p-2.5 rounded-full shadow-sm text-purple-600 dark:text-white"><Wallet className="w-5 h-5" /></div>
                             <span className="font-bold text-purple-900 dark:text-purple-200 text-sm">Wallet</span>
                         </button>
-                        
                         {!hasPermission ? (
                             <button onClick={handleNotificationClick} className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-2xl border border-blue-100 dark:border-blue-900/30 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all hover:border-blue-200 animate-pulse">
                                 <div className="bg-white dark:bg-blue-600 p-2.5 rounded-full shadow-sm text-blue-600 dark:text-white"><Bell className="w-5 h-5" /></div>
@@ -306,6 +298,7 @@ export const VendorSelectionView = ({ city, setVendor, setCurrentView, vendorLog
 export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData, city, vendor, user }) => {
     const [category, setCategory] = useState('All');
     
+    // NOTIFY HANDLER
     const handleNotify = async (item) => {
         if (!user) return alert("Please login first.");
         try {
@@ -316,12 +309,16 @@ export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData,
 
     if (loadingData && marketData.length === 0) return <div className="flex justify-center items-center h-full"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div>;
     
+    // FILTER LOGIC
     const items = marketData.filter(p => {
         const productVendor = p.vendor ? p.vendor.toLowerCase() : "";
         const selectedVendor = vendor ? vendor.toLowerCase() : "";
+        
         const vendorMatch = productVendor.includes(selectedVendor) || selectedVendor.includes(productVendor);
         const categoryMatch = category === 'All' ? true : p.category === category;
+        
         if (vendorMatch) return categoryMatch;
+
         const locationMatch = !p.location || (p.location && city && p.location.toLowerCase() === city.toLowerCase());
         return locationMatch && vendorMatch && categoryMatch;
     });
@@ -370,12 +367,12 @@ export const OrdersView = ({ setCurrentView, user }) => {
     return () => unsubscribe();
   }, [user]);
   
-  // 🟢 NEW: HANDLE RATING
   const handleRateProduct = async (productId, rating, comment, orderId) => {
       if(!user) return;
-      // Dynamically import addReview to avoid circular dependency issues if any
-      const { addReview } = await import('../firebase.js');
-      await addReview(productId, user.uid, user.displayName, rating, comment, orderId);
+      try {
+        const { addReview } = await import('../firebase.js');
+        await addReview(productId, user.uid, user.displayName, rating, comment, orderId);
+      } catch(e) { console.error(e); }
   };
 
   return (
@@ -471,18 +468,18 @@ export const DeciderView = ({ ingredients, setIngredients, generateRecipes, isTh
     </ViewContainer>
 );
 
-// --- 9. PREMIUM CHECKOUT ---
-export const PaymentModal = ({ isOpen, onClose, total, paymentMethod: initialMethod, user, cart, globalWallet, onSuccess, city }) => {
+// --- 9. CHECKOUT MODALS ---
+export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city }) => {
   if (!isOpen) return null;
   const [processing, setProcessing] = useState(false);
-  const [activeMethod, setActiveMethod] = useState(initialMethod || 'paystack');
   const [form, setForm] = useState({ transferName: '', address: '', phone: '', landmark: '', deliveryArea: '' });
+  const [activeMethod, setActiveMethod] = useState(paymentMethod || 'paystack');
   
   // GPS
   const handleUseGPS = () => {
       if (!navigator.geolocation) return alert("Geolocation not supported");
       navigator.geolocation.getCurrentPosition(
-          (pos) => { alert("Location Found! (Backend logic needed)"); },
+          (pos) => { alert("Location Found! (Pricing update requires backend geo-logic)"); },
           () => alert("Location permission denied.")
       );
   };
@@ -513,7 +510,7 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod: initialMet
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-md animate-fade-in p-0 md:p-4">
+    <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
         <div className="bg-white dark:bg-gray-900 w-full max-w-lg p-0 md:rounded-3xl shadow-2xl relative max-h-[95vh] h-[90vh] md:h-auto overflow-hidden flex flex-col rounded-t-3xl border border-gray-100 dark:border-gray-800">
             
             <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-white dark:bg-gray-900 sticky top-0 z-10">
@@ -523,6 +520,30 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod: initialMet
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
                 
+                {/* 🟢 ORDER SUMMARY (ITEMS LIST) */}
+                <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-2xl space-y-3 border border-gray-100 dark:border-gray-800">
+                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                        <ShoppingBag className="w-4 h-4" /> Order Summary
+                    </h4>
+                    <div className="space-y-2 max-h-40 overflow-y-auto pr-1 scrollbar-thin">
+                        {cart.map((item, idx) => (
+                            <div key={idx} className="flex justify-between items-center">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 rounded-lg bg-white dark:bg-gray-700 flex items-center justify-center overflow-hidden">
+                                         {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover"/> : <span>{item.image}</span>}
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <span className="text-sm font-bold text-gray-700 dark:text-gray-200">{item.name}</span>
+                                        <span className="text-[10px] text-gray-500">{item.vendor}</span>
+                                    </div>
+                                </div>
+                                <span className="text-sm font-bold text-gray-900 dark:text-white">₦{item.price.toLocaleString()}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Delivery Details */}
                 <div className="space-y-4">
                     <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
                         <MapPin className="w-4 h-4" /> Delivery Details
@@ -563,6 +584,7 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod: initialMet
                     </div>
                 </div>
 
+                {/* Payment Method */}
                 <div className="space-y-4">
                     <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
                         <CreditCard className="w-4 h-4" /> Payment Method
@@ -570,16 +592,19 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod: initialMet
                     
                     <div className="grid grid-cols-2 gap-3">
                         <button onClick={() => setActiveMethod('paystack')} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 relative ${activeMethod === 'paystack' ? 'border-green-500 bg-green-50/50 dark:bg-green-900/10 text-green-700 dark:text-green-400 shadow-sm' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-400 hover:border-gray-200'}`}>
+                            {activeMethod === 'paystack' && <div className="absolute top-2 right-2 text-green-500"><CheckCircle className="w-4 h-4" /></div>}
                             <CreditCard className={`w-6 h-6 ${activeMethod === 'paystack' ? 'text-green-500' : 'text-gray-300'}`} />
                             <span className="font-bold text-xs">Paystack</span>
                         </button>
                         <button onClick={() => setActiveMethod('crypto')} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 relative ${activeMethod === 'crypto' ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/10 text-indigo-700 dark:text-indigo-400 shadow-sm' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-400 hover:border-gray-200'}`}>
+                            {activeMethod === 'crypto' && <div className="absolute top-2 right-2 text-indigo-500"><CheckCircle className="w-4 h-4" /></div>}
                             <Wallet className={`w-6 h-6 ${activeMethod === 'crypto' ? 'text-indigo-500' : 'text-gray-300'}`} />
                             <span className="font-bold text-xs">Crypto</span>
                         </button>
                     </div>
                 </div>
 
+                {/* Total */}
                 <div className="pt-4 border-t border-dashed border-gray-200 dark:border-gray-800">
                     <div className="flex justify-between items-center mb-2"><span className="text-gray-500 text-sm">Subtotal</span><span className="font-bold text-gray-900 dark:text-white">₦{total.toLocaleString()}</span></div>
                     <div className="flex justify-between items-center mb-4"><span className="text-gray-500 text-sm">Delivery Fee</span><span className="font-bold text-gray-900 dark:text-white">₦{deliveryFee.toLocaleString()}</span></div>
@@ -613,13 +638,13 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
     <div className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${currentView === 'cart' ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`} onClick={() => setCurrentView(marketSection ? 'market' : 'home')} />
     <div className={`relative bg-white dark:bg-gray-900 shadow-2xl w-full max-w-md h-full flex flex-col pointer-events-auto transition-transform duration-300 ease-out transform ${currentView === 'cart' ? 'translate-x-0' : 'translate-x-full'}`}>
       <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-white dark:bg-gray-900 z-10"><h2 className="text-2xl font-black dark:text-white tracking-tight">Your Cart</h2><button onClick={() => setCurrentView('home')} className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full hover:bg-gray-200 transition-colors"><X className="w-5 h-5 text-gray-500" /></button></div>
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {cart.length === 0 ? <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-2"><ShoppingCart className="w-12 h-12 opacity-20"/><p className="font-medium">Your cart is empty</p></div> : 
-         cart.map(item => <div key={item.cartId} className="flex gap-4 items-center bg-gray-50 dark:bg-gray-800/50 p-3 rounded-2xl border border-transparent hover:border-orange-200 dark:hover:border-orange-900 transition-all"><div className="w-20 h-20 bg-white dark:bg-gray-800 rounded-xl flex items-center justify-center shadow-sm shrink-0 overflow-hidden">{item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" /> : <span className="text-2xl">{item.image}</span>}</div><div className="flex-1 min-w-0"><p className="font-bold text-gray-900 dark:text-white truncate">{item.name}</p><p className="text-xs text-gray-500 mb-2">{item.vendor}</p><div className="flex items-center justify-between"><p className="font-black text-orange-600 dark:text-orange-400">₦{item.price.toLocaleString()}</p></div></div><button onClick={() => removeFromCart(item.cartId)} className="h-8 w-8 bg-white dark:bg-gray-700 rounded-full flex items-center justify-center shadow-sm text-red-500 hover:bg-red-50 transition-colors border border-gray-100 dark:border-gray-600"><Trash2 className="w-4 h-4" /></button></div>)}
+         cart.map(item => <div key={item.cartId} className="flex justify-between items-center bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><div className="flex gap-3"><span className="text-2xl">{item.imageUrl ? <img src={item.imageUrl} className="w-12 h-12 object-cover rounded-lg"/> : item.image}</span><div><p className="font-bold text-sm dark:text-white">{item.name}</p><p className="text-xs text-gray-500">₦{item.price.toLocaleString()}</p></div></div><button onClick={() => removeFromCart(item.cartId)} className="text-red-500"><Minus className="w-4 h-4" /></button></div>)}
       </div>
-      <div className="p-6 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 pb-8">
+      <div className="p-6 border-t dark:border-gray-800 bg-white dark:bg-gray-900 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 pb-8">
         <div className="flex justify-between items-end mb-4"><span className="text-gray-500 font-bold text-sm">Subtotal</span><span className="text-3xl font-black dark:text-white tracking-tight">₦{cartTotal.toLocaleString()}</span></div>
-        <button onClick={() => setShowModal(true)} disabled={cart.length === 0} className="w-full bg-gray-900 dark:bg-white text-white dark:text-black font-bold py-4 rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2">Proceed to Checkout <ArrowLeft className="w-5 h-5 rotate-180" /></button>
+        <button onClick={() => setShowModal(true)} disabled={cart.length === 0} className="w-full bg-gray-900 dark:bg-orange-600 text-white font-bold py-4 rounded-xl shadow-lg hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed">Checkout</button>
       </div>
     </div>
   </div>

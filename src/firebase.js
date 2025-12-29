@@ -202,6 +202,7 @@ export const getGlobalVendors = async () => {
 // 4. ORDERS & PRODUCTS
 // ==========================================
 
+// 🟢 FIXED: Split into READ Phase and WRITE Phase
 export const createOrder = async (userId, cart, total, paymentMethod, walletAddress, address, transferName, phone, landmark, deliveryFee, status = 'pending') => {
   try {
     await runTransaction(db, async (transaction) => {
@@ -212,30 +213,40 @@ export const createOrder = async (userId, cart, total, paymentMethod, walletAddr
       });
 
       const updates = []; 
-      // 2. Read
+      
+      // 2. READ PHASE (Get all data first)
       for (const [productId, quantity] of Object.entries(itemCounts)) {
         const productRef = doc(db, "products", productId);
         const productDoc = await transaction.get(productRef);
         
-        if (!productDoc.exists()) throw `One of the items in your cart no longer exists.`;
+        if (!productDoc.exists()) throw `Item not found.`;
         
         const currentStock = productDoc.data().stock;
-        if (currentStock < quantity) throw `Sorry! Not enough stock for "${productDoc.data().name}". Only ${currentStock} left.`;
+        if (currentStock < quantity) throw `Not enough stock for "${productDoc.data().name}".`;
         
+        // Save the update for later (DO NOT WRITE YET)
         updates.push({ ref: productRef, newStock: currentStock - quantity });
       }
 
-      // 3. Write
+      // 3. WRITE PHASE (Now perform all writes)
       updates.forEach(update => {
           transaction.update(update.ref, { stock: update.newStock });
       });
 
       const newOrderRef = doc(collection(db, "orders"));
       transaction.set(newOrderRef, {
-        userId, items: cart, total: parseFloat(total), paymentMethod, 
-        walletAddress: walletAddress || null, deliveryAddress: address, 
-        phone, landmark, deliveryFee, transferName: transferName || null,
-        status: status, createdAt: new Date().toISOString()
+        userId, 
+        items: cart, 
+        total: parseFloat(total), 
+        paymentMethod, 
+        walletAddress: walletAddress || null, 
+        deliveryAddress: address, 
+        phone, 
+        landmark, 
+        deliveryFee, 
+        transferName: transferName || null,
+        status: status, 
+        createdAt: new Date().toISOString()
       });
     });
   } catch (e) { 
@@ -281,8 +292,49 @@ export const deleteProduct = async (productId) => {
   await deleteDoc(doc(db, "products", productId));
 };
 
+// 🟢 NEW: ADD REVIEW & UPDATE AVERAGE
+export const addReview = async (productId, userId, userName, rating, comment, orderId) => {
+    try {
+        await runTransaction(db, async (transaction) => {
+            // 1. Create Review
+            const reviewRef = doc(collection(db, "reviews"));
+            transaction.set(reviewRef, {
+                productId, userId, userName, rating, comment, orderId,
+                createdAt: new Date().toISOString()
+            });
+
+            // 2. Update Product Stats
+            const productRef = doc(db, "products", productId);
+            const productDoc = await transaction.get(productRef);
+            
+            if (productDoc.exists()) {
+                const data = productDoc.data();
+                const oldRatingCount = data.ratingCount || 0;
+                const oldAverage = data.rating || 0;
+
+                const newRatingCount = oldRatingCount + 1;
+                const newAverage = ((oldAverage * oldRatingCount) + rating) / newRatingCount;
+
+                transaction.update(productRef, {
+                    rating: parseFloat(newAverage.toFixed(1)),
+                    ratingCount: newRatingCount
+                });
+            }
+        });
+        return true;
+    } catch (e) {
+        console.error("Error adding review:", e);
+        return false;
+    }
+};
+
+// 🟢 EXPORTING THESE IS CRITICAL
+export { collection, query, where, onSnapshot, orderBy };
+
+export const seedDatabase = async () => { console.log("Seeding available."); };
+
 // ==========================================
-// 5. NOTIFICATIONS & ALERTS
+// 5. NOTIFICATIONS
 // ==========================================
 
 export const requestNotificationPermission = async (userId, role, vendorName) => {
@@ -302,20 +354,26 @@ export const requestNotificationPermission = async (userId, role, vendorName) =>
           if ((role === 'sub' || role === 'vendor') && vendorName) {
              await setDoc(doc(db, "notifications", vendorName), { token: token, email: userId }, { merge: true });
           }
-          alert("Success! Alerts enabled.");
+          alert("Success! Device registered for alerts.");
       }
       return token;
     } else {
         alert("Notifications denied. Check browser settings.");
     }
-  } catch (error) { console.error("Notification Error:", error); }
+  } catch (error) { 
+      console.error("Notification Error:", error); 
+      alert("Error setting up notifications.");
+  }
 };
 
 export const onMessageListener = () => new Promise((resolve) => { 
-    onMessage(messaging, (payload) => { resolve(payload); }); 
+    onMessage(messaging, (payload) => { 
+        console.log("Foreground Message:", payload);
+        resolve(payload); 
+    }); 
 });
 
-// 🟢 NEW: SAVE STOCK REQUEST (Back in Stock Notification)
+// 🟢 SAVE STOCK REQUEST
 export const saveStockRequest = async (item, userId, userEmail) => {
     try {
         await addDoc(collection(db, "stock_requests"), {
@@ -333,10 +391,3 @@ export const saveStockRequest = async (item, userId, userEmail) => {
         return false;
     }
 };
-
-// ==========================================
-// 6. EXPORTS
-// ==========================================
-
-export { collection, query, where, onSnapshot, orderBy };
-export const seedDatabase = async () => { console.log("Seeding available."); };

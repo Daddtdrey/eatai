@@ -14,8 +14,9 @@ import {
 } from "firebase/firestore";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
-import { VAPID_KEY } from "./config.js";
 
+// 🟢 IMPORT VAPID KEY FROM CONFIG
+import { VAPID_KEY } from "./config.js";
 
 
 // 🔴 PASTE YOUR FIREBASE CONFIG HERE 🔴
@@ -164,6 +165,7 @@ export const getVendorLogos = async () => {
     } catch(e) { return {}; }
 };
 
+// 🟢 NEW: SMART VENDOR FETCHING (Handles Arrays & Casing)
 export const getGlobalVendors = async () => {
     try {
         const q = query(collection(db, "vendors"));
@@ -174,15 +176,20 @@ export const getGlobalVendors = async () => {
             const data = doc.data();
             if (data.isActive !== false) { 
                 let rawLocs = data.location;
+                
+                // 1. Handle Comma-Separated String
                 if (typeof rawLocs === 'string' && rawLocs.includes(',')) {
                     rawLocs = rawLocs.split(',').map(s => s.trim());
                 }
+                // 2. Handle Single String or Array
                 else if (!Array.isArray(rawLocs)) {
                     rawLocs = [rawLocs || "Irrua"];
                 }
                 
+                // 3. Normalize to Title Case
                 const locations = rawLocs.map(l => l.charAt(0).toUpperCase() + l.slice(1).toLowerCase());
                 
+                // 4. Add Vendor to each Location list
                 locations.forEach(loc => {
                     if (!vendorsByLocation[loc]) vendorsByLocation[loc] = [];
                     if (!vendorsByLocation[loc].includes(doc.id)) {
@@ -202,33 +209,30 @@ export const getGlobalVendors = async () => {
 // 4. ORDERS & PRODUCTS
 // ==========================================
 
-// 🟢 FIXED: Split into READ Phase and WRITE Phase
 export const createOrder = async (userId, cart, total, paymentMethod, walletAddress, address, transferName, phone, landmark, deliveryFee, status = 'pending') => {
   try {
     await runTransaction(db, async (transaction) => {
-      // 1. Group items
+      // 1. Prepare Data
       const itemCounts = {};
       cart.forEach(item => {
           itemCounts[item.id] = (itemCounts[item.id] || 0) + 1;
       });
-
       const updates = []; 
       
-      // 2. READ PHASE (Get all data first)
+      // 2. READ PHASE
       for (const [productId, quantity] of Object.entries(itemCounts)) {
         const productRef = doc(db, "products", productId);
         const productDoc = await transaction.get(productRef);
         
-        if (!productDoc.exists()) throw `Item not found.`;
+        if (!productDoc.exists()) throw `One of the items in your cart no longer exists.`;
         
         const currentStock = productDoc.data().stock;
-        if (currentStock < quantity) throw `Not enough stock for "${productDoc.data().name}".`;
+        if (currentStock < quantity) throw `Sorry! Not enough stock for "${productDoc.data().name}". Only ${currentStock} left.`;
         
-        // Save the update for later (DO NOT WRITE YET)
         updates.push({ ref: productRef, newStock: currentStock - quantity });
       }
 
-      // 3. WRITE PHASE (Now perform all writes)
+      // 3. WRITE PHASE
       updates.forEach(update => {
           transaction.update(update.ref, { stock: update.newStock });
       });
@@ -328,11 +332,6 @@ export const addReview = async (productId, userId, userName, rating, comment, or
     }
 };
 
-// 🟢 EXPORTING THESE IS CRITICAL
-export { collection, query, where, onSnapshot, orderBy };
-
-export const seedDatabase = async () => { console.log("Seeding available."); };
-
 // ==========================================
 // 5. NOTIFICATIONS
 // ==========================================
@@ -345,12 +344,15 @@ export const requestNotificationPermission = async (userId, role, vendorName) =>
     if (permission === 'granted') {
       const token = await getToken(messaging, { vapidKey: VAPID_KEY }); 
       if(userId && token) {
+          // Save to User Profile
           await setDoc(doc(db, "users", userId), { fcmToken: token }, { merge: true });
           
+          // Save to Logistics Group
           if (role === 'logistics' || role === 'super') {
              await setDoc(doc(db, "notifications", "logistics_group"), { [userId]: token }, { merge: true });
           }
 
+          // Save to Vendor Group
           if ((role === 'sub' || role === 'vendor') && vendorName) {
              await setDoc(doc(db, "notifications", vendorName), { token: token, email: userId }, { merge: true });
           }
@@ -358,11 +360,11 @@ export const requestNotificationPermission = async (userId, role, vendorName) =>
       }
       return token;
     } else {
-        alert("Notifications denied. Check browser settings.");
+        alert("Notifications denied. Please enable them in browser settings.");
     }
   } catch (error) { 
       console.error("Notification Error:", error); 
-      alert("Error setting up notifications.");
+      alert("Error setting up notifications: " + error.message);
   }
 };
 
@@ -373,7 +375,7 @@ export const onMessageListener = () => new Promise((resolve) => {
     }); 
 });
 
-// 🟢 SAVE STOCK REQUEST
+// 🟢 NEW: SAVE STOCK REQUEST (Back in Stock Notification)
 export const saveStockRequest = async (item, userId, userEmail) => {
     try {
         await addDoc(collection(db, "stock_requests"), {
@@ -391,3 +393,10 @@ export const saveStockRequest = async (item, userId, userEmail) => {
         return false;
     }
 };
+
+// ==========================================
+// 6. EXPORTS (Must be at bottom)
+// ==========================================
+
+export { collection, query, where, onSnapshot, orderBy };
+export const seedDatabase = async () => { console.log("Seeding available."); };

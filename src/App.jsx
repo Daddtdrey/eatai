@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X 
+  ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share 
 } from 'lucide-react';
 import { auth, getAllProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors } from './firebase.js'; 
 import { onAuthStateChanged } from 'firebase/auth';
@@ -48,6 +48,7 @@ export default function EatAi() {
   const [notification, setNotification] = useState(null);
   const [deferredPrompt, setDeferredPrompt] = useState(null); // 🟢 Store install prompt
   const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
 
   // 5. AI & Filter State
   const [ingredients, setIngredients] = useState('');
@@ -91,8 +92,19 @@ export default function EatAi() {
       return () => u(); 
   }, []);
 
-  // 🟢 INSTALL PROMPT LISTENER (Android)
+  // 🟢 INSTALL PROMPT LISTENER (Android & iOS Detection)
   useEffect(() => {
+    // 1. Detect iOS
+    const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    
+    // Show banner on iOS if not installed (delayed)
+    if (iOS && !isStandalone) {
+        setIsIOS(true);
+        setTimeout(() => setShowInstallBanner(true), 3000);
+    }
+
+    // 2. Detect Android (Chrome)
     const handler = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -182,6 +194,25 @@ export default function EatAi() {
     }
     setDeferredPrompt(null);
   };
+  
+  // AI Logic
+  const generateRecipes = async () => {
+    if (!ingredients.trim()) return;
+    setIsThinking(true); 
+    setAiRecipe(null);
+    try {
+        const { GEMINI_API_KEY } = await import('./config.js');
+        const prompt = `Chef mode. Ingredients: ${ingredients}. ${activeFilters.join(', ')}. 2 Recipes. Format: Title, Ingredients, Steps. No markdown.`;
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY}`, { 
+            method: 'POST', 
+            headers: {'Content-Type': 'application/json'}, 
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) 
+        });
+        const data = await res.json();
+        setAiRecipe(data.candidates?.[0]?.content?.parts?.[0]?.text);
+    } catch(e) { console.error(e); } 
+    finally { setIsThinking(false); }
+  };
 
   // --- RENDER ---
   if (authLoading) return <div className="min-h-screen flex items-center justify-center dark:bg-gray-900"><div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div></div>;
@@ -193,19 +224,21 @@ export default function EatAi() {
         
         {notification && <Toast message={notification} />}
 
-        {/* 🟢 INSTALL BANNER (Shows on Android Chrome if not installed) */}
+        {/* 🟢 SMART INSTALL BANNER */}
         {showInstallBanner && (
           <div className="fixed top-0 left-0 right-0 z-50 bg-orange-600 text-white p-4 shadow-lg animate-slide-down flex justify-between items-center">
             <div className="flex items-center gap-3">
                <div className="bg-white/20 p-2 rounded-lg"><Download className="w-5 h-5"/></div>
                <div>
-                 <p className="font-bold text-sm">Install EatAi App</p>
-                 <p className="text-xs opacity-90">Better experience, instant loading.</p>
+                 <p className="font-bold text-sm">Install EatAi</p>
+                 <p className="text-xs opacity-90">{isIOS ? "Tap Share below, then 'Add to Home Screen'" : "Add to Home Screen for best experience"}</p>
                </div>
             </div>
             <div className="flex gap-2">
                 <button onClick={() => setShowInstallBanner(false)} className="p-2 text-orange-200 hover:text-white"><X className="w-5 h-5"/></button>
-                <button onClick={handleInstallClick} className="bg-white text-orange-600 px-4 py-2 rounded-lg text-xs font-bold shadow-sm">Install</button>
+                {/* Only show 'Install' button on Android. iOS requires manual action. */}
+                {!isIOS && <button onClick={handleInstallClick} className="bg-white text-orange-600 px-4 py-2 rounded-lg text-xs font-bold shadow-sm">Install</button>}
+                {isIOS && <div className="animate-bounce"><Share className="w-5 h-5"/></div>}
             </div>
           </div>
         )}
@@ -222,7 +255,7 @@ export default function EatAi() {
             city={city} 
         />
         
-        {/* HEADER: Updated background to off-white */}
+        {/* HEADER */}
         <header className="flex-none flex items-center justify-between px-6 py-4 bg-white/80 backdrop-blur-md dark:bg-gray-900/80 shadow-sm z-40 transition-colors border-b border-gray-200/50 dark:border-gray-800">
             <div className="text-xl font-black text-orange-500 cursor-pointer" onClick={() => setCurrentView('home')}>EatAi</div>
             <div className="flex items-center gap-3">
@@ -234,7 +267,7 @@ export default function EatAi() {
         <main className="flex-1 overflow-hidden relative flex flex-col">
             {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} />}
             
-            {/* 🟢 USE LOCATIONS from Config */}
+            {/* 🟢 PASS DYNAMIC LOCATIONS */}
             {currentView === 'location' && 
                 <LocationSelectionView 
                     setCity={setCity} 
@@ -243,6 +276,7 @@ export default function EatAi() {
                 />
             }
             
+            {/* 🟢 PASS DYNAMIC VENDORS */}
             {currentView === 'vendors' && 
                 <VendorSelectionView 
                     city={city} 
@@ -261,7 +295,7 @@ export default function EatAi() {
                     loadingData={loadingData} 
                     city={city} 
                     vendor={vendor} 
-                    user={user} // 🟢 Pass user for "Notify Me" feature
+                    user={user}
                 />
             }
             
@@ -272,23 +306,7 @@ export default function EatAi() {
                 <DeciderView 
                     ingredients={ingredients} 
                     setIngredients={setIngredients} 
-                    generateRecipes={async () => {
-                         if (!ingredients.trim()) return;
-                         setIsThinking(true); 
-                         setAiRecipe(null);
-                         try {
-                              const { GEMINI_API_KEY } = await import('./config.js');
-                              const prompt = `Chef mode. Ingredients: ${ingredients}. ${activeFilters.join(', ')}. 2 Recipes. Format: Title, Ingredients, Steps. No markdown.`;
-                              const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY}`, { 
-                                 method: 'POST', 
-                                 headers: {'Content-Type': 'application/json'}, 
-                                 body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) 
-                             });
-                             const data = await res.json();
-                             setAiRecipe(data.candidates?.[0]?.content?.parts?.[0]?.text);
-                         } catch(e) { console.error(e); } 
-                         finally { setIsThinking(false); }
-                    }} 
+                    generateRecipes={generateRecipes} 
                     isThinking={isThinking} 
                     aiRecipe={aiRecipe} 
                     setAiRecipe={setAiRecipe}

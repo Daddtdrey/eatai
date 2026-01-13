@@ -1,20 +1,21 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App' // 🟢 FIX: Removed .jsx extension to let bundler resolve it
+import App from './App.jsx'
 import './index.css'
 
-// 🟢 PWA AUTOMATION
-// If this still fails, ensure you ran: npm install vite-plugin-pwa
+// 🟢 PWA REGISTRATION (Critical for Install & Notifications)
 import { registerSW } from 'virtual:pwa-register'
 
 const updateSW = registerSW({
   onNeedRefresh() {
-    if(confirm("New content available. Reload?")) {
+    // If a new version is deployed, we ask the user (or just auto-reload)
+    console.log("New content available, preparing to update...");
+    if (confirm("New update available for EatAi! Click OK to refresh.")) {
       updateSW(true);
     }
   },
   onOfflineReady() {
-    console.log("App ready to work offline");
+    console.log("EatAi is ready to work offline 🚀");
   },
 })
 

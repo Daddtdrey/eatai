@@ -164,8 +164,6 @@ export const HomeView = ({ setCurrentView, user }) => {
                     </div>
 
                     <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767032932/Nigerian_Jollof_rice__fried_plantains_and_chicken_-removebg-preview_jthyvl.png" className="absolute -right-10 -bottom-8 w-64 h-64 object-contain drop-shadow-2xl transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 z-20" alt="Burger" />
-                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767032931/West_African_Dish__spicyfood__foodisland-removebg-preview_vv0hpf.png" className="absolute right-36 top-6 w-24 h-24 object-contain opacity-90 rotate-12 z-10 blur-[1px]" alt="Pizza" />
-                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767041008/These_Bold_Burger_Bowls_are_the_ultimate_low-carb_-removebg-preview_kjodwx.png" className="absolute right-48 -bottom-8 w-28 h-28 object-contain opacity-70 -rotate-12 z-10" alt="Drink" />
                 </div>
 
                      <div>

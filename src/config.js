@@ -1,7 +1,7 @@
 export const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 // 🔴 REPLACE THIS WITH YOUR PAYSTACK PUBLIC KEY
-export const PAYSTACK_KEY = "pk_test_820dddbfe9b5fea37e5e7d83eaaf2fd50065f0c7"; 
+export const PAYSTACK_KEY = "pk_live_e26a023051d0eb34273cc6f86ccbf0e26ebbfdb9"; 
 
 // 🔴 REPLACE THIS WITH YOUR FIREBASE VAPID KEY (Cloud Messaging -> Web Config)
 export const VAPID_KEY = "PASTE_YOUR_LONG_KEY_HERE"; 

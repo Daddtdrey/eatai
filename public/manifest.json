@@ -1,8 +1,8 @@
 {
   "name": "EatAi Food Delivery",
   "short_name": "EatAi",
-  "description": "Order food from Nasco, Big Joe, and top vendors.",
-  "theme_color": "#ffffff",
+  "description": "Order food from Nasco, Big Joe, and top vendors in Irrua, Ekpoma, and Uromi.",
+  "theme_color": "#F97316",
   "background_color": "#ffffff",
   "display": "standalone",
   "orientation": "portrait",

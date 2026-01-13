@@ -230,7 +230,7 @@ export default function EatAi() {
             <div className="flex items-center gap-3">
                <div className="bg-white/20 p-2 rounded-lg"><Download className="w-5 h-5"/></div>
                <div>
-                 <p className="font-bold text-sm">Install EatAi</p>
+                 <p className="font-bold text-sm">Install EatAi App</p>
                  <p className="text-xs opacity-90">{isIOS ? "Tap Share below, then 'Add to Home Screen'" : "Add to Home Screen for best experience"}</p>
                </div>
             </div>
@@ -267,7 +267,7 @@ export default function EatAi() {
         <main className="flex-1 overflow-hidden relative flex flex-col">
             {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} />}
             
-            {/* 🟢 PASS DYNAMIC LOCATIONS */}
+            {/* 🟢 USE LOCATIONS from Config */}
             {currentView === 'location' && 
                 <LocationSelectionView 
                     setCity={setCity} 
@@ -276,7 +276,6 @@ export default function EatAi() {
                 />
             }
             
-            {/* 🟢 PASS DYNAMIC VENDORS */}
             {currentView === 'vendors' && 
                 <VendorSelectionView 
                     city={city} 
@@ -295,7 +294,7 @@ export default function EatAi() {
                     loadingData={loadingData} 
                     city={city} 
                     vendor={vendor} 
-                    user={user}
+                    user={user} 
                 />
             }
             
@@ -340,6 +339,7 @@ export default function EatAi() {
             }
         </main>
 
+        {/* FLOATING ACTION BUTTONS */}
         {isAdmin && (
              <div className="fixed bottom-24 left-6 z-50 animate-bounce"><button onClick={() => setCurrentView('admin')} className="bg-gray-900 text-white font-bold text-xs px-4 py-3 rounded-full shadow-xl flex items-center gap-2 border border-gray-700 hover:bg-gray-800 transition-colors"><Database className="w-4 h-4" /> Manager HQ</button></div>
         )}

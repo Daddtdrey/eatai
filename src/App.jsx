@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { 
   ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share 
 } from 'lucide-react';
-import { auth, getAllProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors } from './firebase.js'; 
+// 🟢 FIX: Use ./firebase.js (Current folder) not ../firebase.js
+import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors } from './firebase.js'; 
 import { onAuthStateChanged } from 'firebase/auth';
 
-// 🟢 IMPORT MODULES
+// 🟢 FIX: Use ./components (Current folder)
 import { Toast } from './components/UI.jsx';
 import { 
     LoginView, HomeView, LocationSelectionView, VendorSelectionView, 
@@ -27,8 +28,14 @@ export default function EatAi() {
   const [loadingData, setLoadingData] = useState(true);
   const [vendorLogos, setVendorLogos] = useState({});
   const [vendorsByLocation, setVendorsByLocation] = useState(FALLBACK_VENDORS);
+  const [vendorMetadata, setVendorMetadata] = useState({}); 
 
-  // 3. User Preferences (Persisted)
+  // Pagination State
+  const [lastDoc, setLastDoc] = useState(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  // 3. User Preferences
   const [city, setCity] = useState(localStorage.getItem('eatai_city') || null);
   const [vendor, setVendor] = useState(localStorage.getItem('eatai_vendor') || null);
   const [cart, setCart] = useState(() => { 
@@ -46,7 +53,7 @@ export default function EatAi() {
 
   // 4. UI State
   const [notification, setNotification] = useState(null);
-  const [deferredPrompt, setDeferredPrompt] = useState(null); // 🟢 Store install prompt
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
 
@@ -65,7 +72,6 @@ export default function EatAi() {
   useEffect(() => { localStorage.setItem('eatai_view', currentView); }, [currentView]);
   useEffect(() => { localStorage.setItem('eatai_cart', JSON.stringify(cart)); }, [cart]);
   
-  // Dark Mode Effect
   useEffect(() => { 
       localStorage.setItem('eatai_dark_mode', JSON.stringify(darkMode));
       if (darkMode) {
@@ -92,19 +98,16 @@ export default function EatAi() {
       return () => u(); 
   }, []);
 
-  // 🟢 INSTALL PROMPT LISTENER (Android & iOS Detection)
+  // Install Prompt Listener
   useEffect(() => {
-    // 1. Detect iOS
     const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream;
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
     
-    // Show banner on iOS if not installed (delayed)
     if (iOS && !isStandalone) {
         setIsIOS(true);
         setTimeout(() => setShowInstallBanner(true), 3000);
     }
 
-    // 2. Detect Android (Chrome)
     const handler = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -114,26 +117,33 @@ export default function EatAi() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
-  // Data Loading (Fetch & Cache)
+  // Data Loading
   useEffect(() => { 
       const fetchData = async () => {
           try {
-            const products = await getAllProducts();
-            setMarketData(products);
-            
-            // 🟢 Load Dynamic Vendors from Firebase
-            const dynamicVendors = await getGlobalVendors();
-            if (dynamicVendors) {
-                // Merge dynamic vendors with fallback config to ensure none are lost
+            // 1. Products (Paginated)
+            const { data, lastVisible } = await getPaginatedProducts(null);
+            setMarketData(data);
+            setLastDoc(lastVisible);
+            setHasMore(data.length === 20);
+
+            // 2. Vendors (Dynamic)
+            const result = await getGlobalVendors();
+            if (result && result.vendorsByLocation) {
                 const mergedVendors = { ...FALLBACK_VENDORS };
-                Object.keys(dynamicVendors).forEach(loc => {
+                Object.keys(result.vendorsByLocation).forEach(loc => {
                     const existing = mergedVendors[loc] || [];
-                    const incoming = dynamicVendors[loc];
+                    const incoming = result.vendorsByLocation[loc];
                     mergedVendors[loc] = [...new Set([...existing, ...incoming])];
                 });
                 setVendorsByLocation(mergedVendors);
+                
+                if (result.vendorMetadata) {
+                    setVendorMetadata(result.vendorMetadata);
+                }
             }
 
+            // 3. Logos
             const logos = await getVendorLogos();
             setVendorLogos(logos);
           } catch(e) { console.error("Error loading data", e); }
@@ -143,12 +153,22 @@ export default function EatAi() {
       fetchData();
   }, []);
 
-  // Role Checking
+  const handleLoadMore = async () => {
+      if (isLoadingMore || !hasMore) return;
+      setIsLoadingMore(true);
+      try {
+          const { data, lastVisible } = await getPaginatedProducts(lastDoc);
+          setMarketData(prev => [...prev, ...data]);
+          setLastDoc(lastVisible);
+          setHasMore(data.length === 20);
+      } catch (e) { console.error(e); }
+      setIsLoadingMore(false);
+  };
+
   useEffect(() => {
       const checkRole = async () => {
           if(!user) return;
           try {
-             // 1. Check Database for Role
              const roleData = await getAdminRole(user.email);
              if(roleData) {
                  const foundRole = roleData.role || roleData.type;
@@ -157,7 +177,6 @@ export default function EatAi() {
                      setMyVendorName(roleData.vendor || roleData.vendorName);
                  }
              } else {
-                 // 2. Fallback Configuration
                  const email = user.email.toLowerCase();
                  if(SUPER_ADMINS.includes(email)) setRole('super');
                  else if(LOGISTICS_EMAILS.includes(email)) setRole('logistics');
@@ -184,7 +203,6 @@ export default function EatAi() {
   const isAdmin = role === 'super' || role === 'sub' || role === 'vendor';
   const isLogistics = role === 'logistics';
 
-  // 🟢 INSTALL APP HANDLER
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
@@ -224,7 +242,6 @@ export default function EatAi() {
         
         {notification && <Toast message={notification} />}
 
-        {/* 🟢 SMART INSTALL BANNER */}
         {showInstallBanner && (
           <div className="fixed top-0 left-0 right-0 z-50 bg-orange-600 text-white p-4 shadow-lg animate-slide-down flex justify-between items-center">
             <div className="flex items-center gap-3">
@@ -236,7 +253,6 @@ export default function EatAi() {
             </div>
             <div className="flex gap-2">
                 <button onClick={() => setShowInstallBanner(false)} className="p-2 text-orange-200 hover:text-white"><X className="w-5 h-5"/></button>
-                {/* Only show 'Install' button on Android. iOS requires manual action. */}
                 {!isIOS && <button onClick={handleInstallClick} className="bg-white text-orange-600 px-4 py-2 rounded-lg text-xs font-bold shadow-sm">Install</button>}
                 {isIOS && <div className="animate-bounce"><Share className="w-5 h-5"/></div>}
             </div>
@@ -267,7 +283,6 @@ export default function EatAi() {
         <main className="flex-1 overflow-hidden relative flex flex-col">
             {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} />}
             
-            {/* 🟢 USE LOCATIONS from Config */}
             {currentView === 'location' && 
                 <LocationSelectionView 
                     setCity={setCity} 
@@ -295,6 +310,10 @@ export default function EatAi() {
                     city={city} 
                     vendor={vendor} 
                     user={user} 
+                    vendorMetadata={vendorMetadata}
+                    onLoadMore={handleLoadMore}
+                    hasMore={hasMore}
+                    isLoadingMore={isLoadingMore}
                 />
             }
             
@@ -316,15 +335,15 @@ export default function EatAi() {
                 />
             }
             
-            {/* Admin Views */}
             {currentView === 'admin' && isAdmin && 
                 <AdminView 
                     setCurrentView={setCurrentView} 
                     marketData={marketData} 
                     refreshData={async () => {
-                        const products = await getAllProducts();
-                        setMarketData(products);
-                        localStorage.setItem('eatai_market_data', JSON.stringify(products));
+                        const { data, lastVisible } = await getPaginatedProducts(null);
+                        setMarketData(data);
+                        setLastDoc(lastVisible);
+                        setHasMore(data.length === 20);
                     }} 
                     user={user} 
                     setNotification={setNotification} 

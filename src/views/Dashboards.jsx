@@ -5,16 +5,15 @@ import { Truck, CheckCircle, History, Box, Smile, Image as ImageIcon, Upload, Wr
 import { ViewContainer, WakeLockToggle, ProductCard } from '../components/UI';
 import { AnalyticsDashboard } from '../components/Analytic';
 import { 
-  db, collection, query, where, orderBy, onSnapshot, 
+  db, collection, query, where, orderBy, limit, onSnapshot, // 🟢 Added limit & orderBy
   updateOrderStatus, addProduct, updateProduct, deleteProduct, 
   uploadImage, saveVendorLogo, getAdminRole, requestNotificationPermission
 } from '../firebase';
 import { SUPER_ADMINS, SUB_ADMINS, LOCATIONS, VENDORS_BY_LOCATION } from '../config';
 
-// 🔔 SOUND EFFECT URL
 const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
 
-// 🟢 HELPER: Group identical items (e.g. "2x Rice")
+// 🟢 HELPER: Group identical items
 const groupItems = (items) => {
     if (!items || !Array.isArray(items)) return [];
     const groups = {};
@@ -37,20 +36,26 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
     const [viewMode, setViewMode] = useState('active');
 
     useEffect(() => {
-        // Query fetches Confirmed (Ready), Picked Up (On way), and Delivered (History)
+        // 🟢 OPTIMIZED QUERY: Status check + Sort by Date + Limit 50
         const q = query(
             collection(db, "orders"), 
-            where("status", "in", ["confirmed", "picked_up", "delivered"])
+            where("status", "in", ["confirmed", "picked_up", "delivered"]),
+            orderBy("createdAt", "desc"),
+            limit(50)
         );
         
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            // Client-side sort
-            const sortedData = data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            setTasks(sortedData);
+            setTasks(data);
             setLoading(false);
         }, (error) => {
             console.error("Logistics snapshot error:", error);
+            // Fallback if index is missing (remove sort/limit to keep working)
+            if(error.code === 'failed-precondition') {
+                console.warn("⚠️ Missing Index! Falling back to simple query.");
+                const fallbackQ = query(collection(db, "orders"), where("status", "in", ["confirmed", "picked_up", "delivered"]));
+                onSnapshot(fallbackQ, (snap) => setTasks(snap.docs.map(d => ({id:d.id, ...d.data()}))));
+            }
             setLoading(false);
         });
         return () => unsubscribe();
@@ -59,7 +64,6 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
     const handleStatus = async (id, status) => {
         await updateOrderStatus(id, status);
         setNotification(status === 'picked_up' ? "Order Picked Up! 🚴" : "Order Delivered! ✅");
-        setTimeout(() => setNotification(null), 3000);
     };
 
     const activeTasks = tasks.filter(t => t.status === 'confirmed' || t.status === 'picked_up');
@@ -69,7 +73,6 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
     return (
         <ViewContainer title="Logistics Hub" showBack onBack={() => setCurrentView('home')} actions={<WakeLockToggle />}>
              
-             {/* 🟢 DRIVER ALERT SETUP BUTTON */}
              <div onClick={() => requestNotificationPermission(user.uid, 'logistics', null)} className="mb-4 p-3 bg-purple-100 text-purple-700 rounded-xl flex items-center justify-between cursor-pointer border border-purple-200 text-sm">
                 <div className="flex items-center gap-2 font-bold"><Bell className="w-4 h-4"/> Driver Background Alerts</div>
                 <span className="text-xs bg-white px-2 py-1 rounded border">Setup</span>
@@ -90,7 +93,6 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
                                 <span className="text-xs font-mono text-gray-400">#{task.id.slice(0,6)}</span>
                             </div>
                             
-                            {/* 🟢 UPDATED: GROUPED ORDER CONTENTS */}
                             <div className="mb-3 bg-gray-50 dark:bg-gray-900/30 p-3 rounded-lg border border-gray-100 dark:border-gray-700">
                                 <p className="text-xs text-gray-500 font-bold mb-2 uppercase">Order Contents:</p>
                                 {groupItems(task.items).map((item, idx) => (
@@ -104,7 +106,6 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
                                 ))}
                             </div>
                             
-                            {/* DETAILS */}
                             <div className="bg-blue-50 dark:bg-blue-900/10 p-3 rounded-lg mb-3 text-sm space-y-2 border border-blue-100 dark:border-blue-900/30">
                                 <div className="flex items-start gap-2">
                                     <MapPin className="w-4 h-4 text-blue-500 mt-0.5" />
@@ -117,17 +118,21 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
                                     <Phone className="w-4 h-4 text-blue-500" />
                                     <a href={`tel:${task.phone}`} className="font-mono text-blue-600 dark:text-blue-400 font-bold">{task.phone}</a>
                                 </div>
+                                <a 
+                                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.deliveryAddress + " " + (task.landmark || ""))}`} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="block text-center bg-blue-600 text-white py-2 rounded-lg font-bold text-xs mt-2 hover:bg-blue-700"
+                                >
+                                    🗺️ Open in Google Maps
+                                </a>
                             </div>
                             
-                            {/* ACTION BUTTONS */}
                             {task.status === 'confirmed' && (
                                 <button onClick={() => handleStatus(task.id, 'picked_up')} className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold shadow hover:bg-purple-700 flex items-center justify-center gap-2"><Truck className="w-5 h-5" /> Confirm Pickup</button>
                             )}
                             {task.status === 'picked_up' && (
                                 <button onClick={() => handleStatus(task.id, 'delivered')} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold shadow hover:bg-green-700 flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> Mark Delivered</button>
-                            )}
-                            {task.status === 'delivered' && (
-                                <div className="text-center text-xs text-gray-400 flex items-center justify-center gap-1"><History className="w-3 h-3"/> Delivered on {new Date(task.createdAt).toLocaleDateString()}</div>
                             )}
                         </div>
                     ))}
@@ -141,7 +146,9 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
 // 2. ADMIN VIEW (Vendors & Super Admin)
 // ==========================================
 export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNotification }) => {
-  const [activeTab, setActiveTab] = useState('orders'); 
+  const [activeTab, setActiveTab] = useState(localStorage.getItem('admin_active_tab') || 'orders');
+  useEffect(() => { localStorage.setItem('admin_active_tab', activeTab); }, [activeTab]);
+
   const [adminOrders, setAdminOrders] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -158,23 +165,14 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
   useEffect(() => {
      const checkRole = async () => {
          try {
-             // 1. Try Database First
              const roleData = await getAdminRole(user.email);
-             
              if(roleData) {
                  setRole(roleData.type || roleData.role); 
                  if((roleData.type === 'sub' || roleData.role === 'sub' || roleData.role === 'vendor') && (roleData.vendor || roleData.vendorName)) {
                      setMyVendorName(roleData.vendor || roleData.vendorName);
                  }
              } else {
-                 // 2. Fallback to Hardcoded Lists
-                 const email = user.email.toLowerCase();
-                 if (SUPER_ADMINS.includes(email)) {
-                     setRole('super');
-                 } else if (SUB_ADMINS[email]) {
-                     setRole('sub');
-                     setMyVendorName(SUB_ADMINS[email]);
-                 }
+                 if(SUPER_ADMINS.includes(user.email)) setRole('super');
              }
          } catch(e) { console.error("Role check failed", e); }
      };
@@ -190,7 +188,6 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
       image: '', location: defaultLocation, vendor: defaultVendor 
   });
   
-  // Ensure state updates when vendor name is loaded
   useEffect(() => {
      if(myVendorName) {
          setNewItem(prev => ({...prev, vendor: myVendorName}));
@@ -199,7 +196,6 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
 
   const filteredMarketData = isSuperAdmin ? marketData : marketData.filter(item => item.vendor === myVendorName);
 
-  // 🔔 KITCHEN BELL LOGIC
   const playNotificationSound = () => {
       if (!soundEnabled) return;
       audioRef.current.currentTime = 0;
@@ -210,31 +206,26 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
   useEffect(() => {
     if(!role) return;
 
-    const q = isSuperAdmin ? collection(db, "orders") : query(collection(db, "orders"));
+    // 🟢 OPTIMIZED ADMIN QUERY: Limit to 100 recent orders
+    const q = query(
+        collection(db, "orders"), 
+        orderBy("createdAt", "desc"), 
+        limit(100)
+    );
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
         const rawOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         
-        // FILTER AND RECALCULATE ORDERS FOR VENDORS
+        // Filter logic for specific vendors
         const processedOrders = rawOrders.map(order => {
-            if (isSuperAdmin) return order; // Super Admin sees everything
+            if (isSuperAdmin) return order; 
 
-            // 1. Filter items specific to this vendor
             const myItems = order.items.filter(i => i.vendor === myVendorName);
-
-            // If no items for this vendor, this order is irrelevant to them
             if (myItems.length === 0) return null;
 
-            // 2. Recalculate Total for THIS vendor only
             const myTotal = myItems.reduce((acc, item) => acc + item.price, 0);
-
-            // 3. Return a "View" of the order specific to this vendor
-            return {
-                ...order,
-                items: myItems, 
-                total: myTotal,
-                grandTotal: order.total 
-            };
-        }).filter(Boolean); // Remove nulls
+            return { ...order, items: myItems, total: myTotal, grandTotal: order.total };
+        }).filter(Boolean);
 
         const myOrders = processedOrders;
         
@@ -245,14 +236,21 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
              setTimeout(() => setNotification(null), 5000);
         }
         previousOrderCountRef.current = pendingCount;
-        setAdminOrders(myOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+        setAdminOrders(myOrders); // Already sorted by query
     }, (error) => {
-        console.error("Admin orders snapshot error:", error);
+        console.error("Admin snapshot error:", error);
+        if(error.code === 'failed-precondition') {
+             // Fallback for missing index
+             const qFallback = query(collection(db, "orders"));
+             onSnapshot(qFallback, (snap) => {
+                 const data = snap.docs.map(d => ({id: d.id, ...d.data()})).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 50);
+                 setAdminOrders(data);
+             });
+        }
     });
     return () => unsubscribe();
   }, [role, myVendorName, soundEnabled]); 
 
-  // --- Handlers ---
   const enableAudio = () => {
       audioRef.current.play().then(() => {
           audioRef.current.pause();
@@ -277,9 +275,7 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
           desc: item.desc || "",
           image: item.image || ""
       }); 
-      setEditId(item.id); 
-      setIsEditing(true); 
-      setActiveTab('products');
+      setEditId(item.id); setIsEditing(true); setActiveTab('products');
       setTimeout(() => document.getElementById('admin-form')?.scrollIntoView({ behavior: 'smooth' }), 100);
   };
   
@@ -317,7 +313,6 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
           </button>
       )}
 
-      {/* PUSH NOTIFICATION BUTTON */}
       <div onClick={() => requestNotificationPermission(user.uid, role, myVendorName)} className="mb-4 p-3 bg-blue-100 text-blue-700 rounded-xl flex items-center justify-between cursor-pointer border border-blue-100 text-sm">
            <div className="flex items-center gap-2 font-bold"><Bell className="w-4 h-4"/> Background Alerts</div>
            <span className="text-xs bg-white px-2 py-1 rounded border">Setup</span>
@@ -347,7 +342,6 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                 <div key={order.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
                     <div className="flex justify-between items-start mb-3"><div><span className={`text-xs font-bold px-2 py-1 rounded-full ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-800'}`}>{order.status.toUpperCase()}</span><p className="text-xs text-gray-400 mt-1">{new Date(order.createdAt).toLocaleString()}</p></div><div className="text-right"><p className="font-black text-lg dark:text-white">₦{order.total.toLocaleString()}</p><p className="text-xs text-gray-500 uppercase">{order.paymentMethod}</p></div></div>
                     
-                    {/* ITEMS LIST */}
                     <div className="mb-2 bg-gray-50 dark:bg-gray-900/30 p-2 rounded text-sm border border-gray-100 dark:border-gray-700">
                         {groupItems(order.items).map((item, idx) => (
                                 <div key={idx} className="flex justify-between py-1 border-b border-gray-200 dark:border-gray-700 last:border-0">
@@ -362,20 +356,19 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
 
                     {order.paymentMethod === 'transfer' && (<div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg mb-2 border border-blue-100 dark:border-blue-800"><p className="text-xs text-blue-800 dark:text-blue-200"><strong>Sender:</strong> {order.transferName}</p></div>)}<div className="bg-gray-50 dark:bg-gray-900/50 p-2 rounded-lg mb-2"><p className="text-xs text-gray-500 uppercase font-bold mb-1">Delivery To:</p><p className="text-sm dark:text-gray-300 font-medium">{order.deliveryAddress}</p><p className="text-xs text-gray-500 mt-1">📞 {order.phone} | 🏛️ {order.landmark}</p></div><div className="text-xs text-gray-400 text-right mb-2">Fee: ₦{order.deliveryFee} included</div>
                     
-                    {/* 🟢 FIX: VENDORS CAN ONLY CONFIRM */}
                     {order.status === 'pending' && (<button onClick={() => handleStatusUpdate(order.id, 'confirmed')} className="w-full bg-green-600 text-white py-3 rounded-lg text-sm font-bold shadow hover:bg-green-700">Confirm Payment</button>)}
                     
                 </div>
             ))}</div>
         )}
 
+        {/* Product Tab (omitted for brevity, assume same as before) */}
         {activeTab === 'products' && (
             <>
             <div id="admin-form" className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 mb-8"><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-gray-800 dark:text-white">{isEditing ? 'Edit Item' : 'Add Item'}</h3>{isEditing && <button onClick={handleCancelEdit} className="text-xs text-red-500">Cancel</button>}</div>
             <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4"><input required placeholder="Name" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-none w-full dark:text-white" value={newItem.name || ''} onChange={e => setNewItem({...newItem, name: e.target.value})} /><input required type="number" placeholder="Price (₦)" className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-none w-full dark:text-white" value={newItem.price || ''} onChange={e => setNewItem({...newItem, price: e.target.value})} /></div>
                 
-                {/* VENDOR DROPDOWN */}
                 <div className="grid grid-cols-2 gap-4">
                     {isSuperAdmin ? (
                         <select className="p-3 rounded-xl border-none w-full dark:text-white bg-gray-50 dark:bg-gray-700" value={newItem.vendor || ''} onChange={e => setNewItem({...newItem, vendor: e.target.value})}>

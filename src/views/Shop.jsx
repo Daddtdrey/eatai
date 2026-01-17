@@ -3,19 +3,19 @@ import {
   ChefHat, ShoppingBag, Package, Store, ArrowLeft, LogIn, 
   ShoppingCart, CreditCard, Wallet, MapPin, Leaf, Beef, Zap, Cookie, 
   X, Minus, Sparkles, Box, Bell, Heart, Flame, Baby, Dumbbell, Plus, Eye,
-  Mail, Lock, User, Search, Home, Navigation, ChevronDown, Percent, Trash2, BellRing, CheckCircle
+  Mail, Lock, User, Search, Home, Navigation, ChevronDown, Percent, Trash2, BellRing, CheckCircle, Clock
 } from 'lucide-react';
 import { PaystackButton } from 'react-paystack';
 import { ethers } from 'ethers';
 
-// 🟢 IMPORTS: Added explicit extensions (.jsx, .js) to fix build errors
-import { ViewContainer, DietaryFilter, ProductCard, OrderDetailModal, Toast } from '../components/UI.jsx';
+// 🟢 IMPORTS: Removed explicit extensions to let bundler resolve them
+import { ViewContainer, DietaryFilter, ProductCard, OrderDetailModal, Toast } from '../components/UI';
 import { 
     signInWithGoogle, createOrder, getUserOrders, saveUserProfile, getUserProfile, 
     db, collection, onSnapshot, query, where, saveWalletToProfile, requestNotificationPermission,
     signUpWithEmail, logInWithEmail, saveStockRequest
-} from '../firebase.js';
-import { LOCATIONS, VENDORS_BY_LOCATION, PAYSTACK_KEY, BANK_DETAILS, calculateDeliveryFee, GEMINI_API_KEY } from '../config.js';
+} from '../firebase';
+import { LOCATIONS, VENDORS_BY_LOCATION, PAYSTACK_KEY, BANK_DETAILS, calculateDeliveryFee, GEMINI_API_KEY } from '../config';
 
 // --- 1. LOGIN VIEW ---
 export const LoginView = () => {
@@ -89,7 +89,7 @@ export const LoginView = () => {
     );
 };
 
-// --- 2. HOME VIEW ---
+// --- 2. HOME VIEW (UPDATED BANNER) ---
 export const HomeView = ({ setCurrentView, user }) => {
     const [hasPermission, setHasPermission] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -107,10 +107,10 @@ export const HomeView = ({ setCurrentView, user }) => {
 
     // Mock Data for Top Vendors
     const allTopVendors = [
-        { name: 'Nasco', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1766439247/p6wripeyb1nf5k4r9vkd.jpg', tags: 'Rice • Pasta' },
-        { name: 'Big Joe', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767036560/crack_burgers_--removebg-preview_wguehg.png', tags: 'Grill • Chicken' },
-        { name: 'Phattie Chop', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1766433503/Screenshot_2025-12-22_115720_jgc2vy.png', tags: 'full meal' },
-        { name: 'Yummy You', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767032932/Nigerian_Jollof_rice__fried_plantains_and_chicken_-removebg-preview_jthyvl.png', tags: 'Snacks' }
+        { name: 'Bigtaste', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768122908/big_taste_pic_c70r4v.jpg', tags: 'Rice • Pasta' },
+        { name: 'Open Hall', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768247254/e27a4708yer6r8roladp.jpg', tags: 'food' },
+        { name: 'Phattie Chopbox', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1766433503/Screenshot_2025-12-22_115720_jgc2vy.png', tags: 'food' },
+        { name: 'Golden Bite', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768470565/goldenbite_mh6jsf.jpg', tags: 'Snacks' }
     ];
 
     // Search Logic
@@ -153,7 +153,7 @@ export const HomeView = ({ setCurrentView, user }) => {
 
             <div className="p-6 space-y-6">
                 
-                {/* HERO BANNER */}
+                {/* HERO BANNER (ORANGE) */}
                 <div className="relative w-full h-60 bg-gradient-to-r from-orange-500 to-red-600 rounded-[2.5rem] overflow-hidden shadow-xl shadow-orange-500/30 flex items-center group cursor-pointer transition-transform active:scale-[0.99]" onClick={() => setCurrentView('location')}>
                     <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
                     
@@ -163,10 +163,14 @@ export const HomeView = ({ setCurrentView, user }) => {
                         <span className="text-white/90 text-xs font-bold flex items-center gap-2 group-hover:text-orange-100 transition-colors">Order Food <div className="bg-white text-orange-600 rounded-full p-1 shadow-sm"><ArrowLeft className="w-3 h-3 rotate-180"/></div></span>
                     </div>
 
+                    {/* BIG FOOD IMAGES */}
                     <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767032932/Nigerian_Jollof_rice__fried_plantains_and_chicken_-removebg-preview_jthyvl.png" className="absolute -right-10 -bottom-8 w-64 h-64 object-contain drop-shadow-2xl transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 z-20" alt="Burger" />
+                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767041008/These_Bold_Burger_Bowls_are_the_ultimate_low-carb_-removebg-preview_kjodwx.png" className="absolute right-36 top-6 w-24 h-24 object-contain opacity-90 rotate-12 z-10 blur-[1px]" alt="Pizza" />
+                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768585000/smlxto11vt60fjwrxluc.jpg" className="absolute right-48 -bottom-8 w-28 h-28 object-contain opacity-70 -rotate-12 z-10" alt="Drink" />
                 </div>
 
-                     <div>
+                {/* TOP VENDORS LIST */}
+                <div>
                     <div className="flex justify-between items-center mb-3">
                         <h3 className="text-gray-900 dark:text-white font-bold text-lg font-[Fredoka]">Top Vendors</h3>
                         {!searchQuery && <span onClick={() => setCurrentView('vendors')} className="text-orange-500 text-xs font-bold cursor-pointer hover:underline">See all</span>}
@@ -293,58 +297,73 @@ export const VendorSelectionView = ({ city, setVendor, setCurrentView, vendorLog
 };
 
 // --- 5. MARKET VIEW ---
-export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData, city, vendor, user }) => {
+export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData, city, vendor, user, vendorMetadata, onLoadMore, hasMore, isLoadingMore }) => {
     const [category, setCategory] = useState('All');
     
-    // NOTIFY HANDLER
+    // Check Hours
+    const currentHour = new Date().getHours();
+    const currentMinute = new Date().getMinutes();
+    const currentTime = currentHour + (currentMinute / 60);
+
+    const vendorInfo = vendorMetadata?.[vendor] || {};
+    const openTime = parseFloat(vendorInfo.openTime?.replace(':', '.') || "8.00");
+    const closeTime = parseFloat(vendorInfo.closeTime?.replace(':', '.') || "22.00");
+
+    const isOpen = currentTime >= openTime && currentTime < closeTime;
+
     const handleNotify = async (item) => {
         if (!user) return alert("Please login first.");
         try {
             const success = await saveStockRequest(item, user.uid, user.email);
-            if (success) alert(`🔔 Alert set for ${item.name}! We'll notify you when back.`);
+            if (success) alert(`🔔 Alert set for ${item.name}!`);
         } catch(e) { console.error(e); }
     };
 
     if (loadingData && marketData.length === 0) return <div className="flex justify-center items-center h-full"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div>;
     
-    // FILTER LOGIC
     const items = marketData.filter(p => {
         const productVendor = p.vendor ? p.vendor.toLowerCase() : "";
         const selectedVendor = vendor ? vendor.toLowerCase() : "";
-        
         const vendorMatch = productVendor.includes(selectedVendor) || selectedVendor.includes(productVendor);
         const categoryMatch = category === 'All' ? true : p.category === category;
-        
         if (vendorMatch) return categoryMatch;
-
         const locationMatch = !p.location || (p.location && city && p.location.toLowerCase() === city.toLowerCase());
         return locationMatch && vendorMatch && categoryMatch;
     });
 
-    const categories = [{ id: 'All', label: 'All', icon: null }, { id: 'fullMeal', label: 'Meals', icon: ShoppingBag }, { id: 'cravings', label: 'Cravings', icon: Heart }, { id: 'pregnancy', label: 'Pregnancy', icon: Baby }, { id: 'fitness', label: 'Fitness', icon: Dumbbell }, { id: 'male', label: 'Male', icon: Flame }];
+    const categories = [{ id: 'All', label: 'All', icon: null }, { id: 'fullMeal', label: 'Meals', icon: ShoppingBag }, { id: 'cravings', label: 'Cravings', icon: Heart }, { id: 'pregnancy', label: 'Pregnancy', icon: Baby }];
     
     return (
         <ViewContainer title={`${vendor} Menu`} showBack onBack={() => setCurrentView('vendors')}>
+            {/* CLOSED BANNER */}
+            {!isOpen && (
+                <div className="bg-red-500 text-white p-3 rounded-xl mb-4 flex items-center justify-between shadow-md">
+                    <div className="flex items-center gap-2">
+                        <Clock className="w-5 h-5"/>
+                        <span className="font-bold text-sm">Closed (Opens {vendorInfo.openTime || "8:00"})</span>
+                    </div>
+                </div>
+            )}
+
             <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide px-1">{categories.map(cat => (<DietaryFilter key={cat.id} icon={cat.icon} label={cat.label} active={category === cat.id} onClick={() => setCategory(cat.id)} />))}</div>
             
             <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide min-h-0">
-                {items.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-                        <Box className="w-16 h-16 mb-4 opacity-20" />
-                        <p>No items found.</p>
-                        <button onClick={() => setCategory('All')} className="mt-4 text-xs bg-gray-200 dark:bg-gray-800 px-4 py-2 rounded-full font-bold">Clear Filters</button>
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 gap-4 pb-4">{items.map((item) => (
-                        <ProductCard 
-                            key={item.id} 
-                            item={item} 
-                            addToCart={addToCart} 
-                            isAdmin={false} 
-                            onNotify={handleNotify} 
-                        />
-                    ))}</div>
+                <div className="grid grid-cols-1 gap-4 pb-4">{items.map((item) => (
+                    <ProductCard 
+                        key={item.id} 
+                        item={item} 
+                        addToCart={isOpen ? addToCart : () => alert("Vendor is currently closed.")} 
+                        isAdmin={false} 
+                        onNotify={handleNotify} 
+                    />
+                ))}
+                {/* LOAD MORE */}
+                {hasMore && (
+                    <button onClick={onLoadMore} disabled={isLoadingMore} className="w-full py-3 bg-gray-100 dark:bg-gray-800 text-gray-500 font-bold rounded-xl mt-4 active:scale-95">
+                        {isLoadingMore ? "Loading..." : "Load More Food 🍲"}
+                    </button>
                 )}
+                </div>
             </div>
         </ViewContainer>
     );
@@ -403,7 +422,7 @@ export const WalletView = ({ setCurrentView, user, setGlobalWallet }) => {
     setIsLoading(true);
     setError(null);
     try {
-        await new Promise(resolve => setTimeout(resolve, 100)); // UI Breath
+        await new Promise(resolve => setTimeout(resolve, 100)); 
         const w = ethers.Wallet.createRandom();
         const wd = { address: w.address, privateKey: w.privateKey, mnemonic: w.mnemonic?.phrase };
         localStorage.setItem(`eatai_wallet_${user.uid}`, JSON.stringify(wd));
@@ -466,10 +485,11 @@ export const DeciderView = ({ ingredients, setIngredients, generateRecipes, isTh
     </ViewContainer>
 );
 
-// --- 9. CHECKOUT MODALS ---
+// --- 9. CHECKOUT MODALS (WITH PICKUP & SUMMARY) ---
 export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city }) => {
   if (!isOpen) return null;
   const [processing, setProcessing] = useState(false);
+  const [orderType, setOrderType] = useState('delivery'); 
   const [form, setForm] = useState({ transferName: '', address: '', phone: '', landmark: '', deliveryArea: '' });
   const [activeMethod, setActiveMethod] = useState(paymentMethod || 'paystack');
   
@@ -477,7 +497,7 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
   const handleUseGPS = () => {
       if (!navigator.geolocation) return alert("Geolocation not supported");
       navigator.geolocation.getCurrentPosition(
-          (pos) => { alert("Location Found! (Pricing update requires backend geo-logic)"); },
+          (pos) => { alert("Location Found! (Backend logic needed)"); },
           () => alert("Location permission denied.")
       );
   };
@@ -490,18 +510,21 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
     }
   }, [user, isOpen]);
 
-  const deliveryFee = calculateDeliveryFee(city, form.deliveryArea);
+  // Pickup = Free Delivery
+  const deliveryFee = orderType === 'pickup' ? 0 : calculateDeliveryFee(city, form.deliveryArea);
   const grandTotal = total + deliveryFee;
+  
   const paystackConfig = { reference: (new Date()).getTime().toString(), email: user.email, amount: grandTotal * 100, publicKey: PAYSTACK_KEY };
   const handlePaystackSuccess = (reference) => { handlePayment("paystack"); };
 
   const handlePayment = async (method = activeMethod) => {
-    if (!form.address || !form.phone || !form.deliveryArea) return alert("Please select a Delivery Area and enter address.");
+    // Validate only if Delivery
+    if (orderType === 'delivery' && (!form.address || !form.phone || !form.deliveryArea)) return alert("Please select a Delivery Area and enter address.");
     
     setProcessing(true);
     if (method !== 'paystack') await new Promise(r => setTimeout(r, 1500));
     try {
-        await createOrder(user.uid, cart, grandTotal, method, globalWallet?.address, form.address, "Paystack Online", form.phone, form.landmark, deliveryFee, method === 'paystack' ? 'confirmed' : 'pending');
+        await createOrder(user.uid, cart, grandTotal, method, globalWallet?.address, form.address, "Paystack Online", form.phone, form.landmark, deliveryFee, method === 'paystack' ? 'confirmed' : 'pending', orderType);
         await saveUserProfile(user.uid, { address: form.address, phone: form.phone, landmark: form.landmark });
         setProcessing(false); onSuccess();
     } catch (e) { setProcessing(false); alert("Error placing order: " + e.message); }
@@ -509,140 +532,86 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
-        <div className="bg-white dark:bg-gray-900 w-full max-w-lg p-0 md:rounded-3xl shadow-2xl relative max-h-[95vh] h-[90vh] md:h-auto overflow-hidden flex flex-col rounded-t-3xl border border-gray-100 dark:border-gray-800">
+        <div className="bg-white dark:bg-gray-900 w-full max-w-lg p-6 rounded-t-3xl md:rounded-3xl shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <button onClick={onClose} className="absolute top-4 right-4"><X className="w-5 h-5" /></button>
+            <h3 className="text-xl font-bold text-center mb-4 dark:text-white">Complete Order</h3>
             
-            <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-white dark:bg-gray-900 sticky top-0 z-10">
-                <h3 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">Checkout</h3>
-                <button onClick={onClose} className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full hover:bg-gray-200 transition-colors"><X className="w-5 h-5 text-gray-500" /></button>
+            {/* TOGGLE: Delivery / Pickup */}
+            <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl mb-4">
+                <button onClick={() => setOrderType('delivery')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${orderType === 'delivery' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>Delivery</button>
+                <button onClick={() => setOrderType('pickup')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${orderType === 'pickup' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>Pickup</button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                
-                {/* 🟢 ORDER SUMMARY (ITEMS LIST) */}
-                <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-2xl space-y-3 border border-gray-100 dark:border-gray-800">
-                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                        <ShoppingBag className="w-4 h-4" /> Order Summary
-                    </h4>
-                    <div className="space-y-2 max-h-40 overflow-y-auto pr-1 scrollbar-thin">
-                        {cart.map((item, idx) => (
-                            <div key={idx} className="flex justify-between items-center">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-8 h-8 rounded-lg bg-white dark:bg-gray-700 flex items-center justify-center overflow-hidden">
-                                         {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover"/> : <span>{item.image}</span>}
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <span className="text-sm font-bold text-gray-700 dark:text-gray-200">{item.name}</span>
-                                        <span className="text-[10px] text-gray-500">{item.vendor}</span>
-                                    </div>
-                                </div>
-                                <span className="text-sm font-bold text-gray-900 dark:text-white">₦{item.price.toLocaleString()}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Delivery Details */}
-                <div className="space-y-4">
-                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                        <MapPin className="w-4 h-4" /> Delivery Details
-                    </h4>
-                    
-                    <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-2xl space-y-3 border border-gray-100 dark:border-gray-800">
-                        <div className="relative">
-                            <div className="flex justify-between items-center mb-1.5">
-                                <label className="text-[11px] font-bold text-gray-500 uppercase">Area</label>
-                                <button onClick={handleUseGPS} className="text-[11px] text-orange-500 font-bold flex items-center gap-1 hover:text-orange-600"><Navigation className="w-3 h-3"/> Use GPS</button>
-                            </div>
-                            <select 
-                                className="w-full bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500 outline-none appearance-none"
-                                value={form.deliveryArea} 
-                                onChange={e => setForm({...form, deliveryArea: e.target.value})}
-                            >
-                                <option value="">Select Area...</option>
-                                {LOCATIONS.map(l => <option key={l} value={l}>{l}</option>)}
-                            </select>
-                            {form.deliveryArea && <p className="text-xs text-green-600 mt-1.5 font-medium flex items-center gap-1"><Plus className="w-3 h-3"/> Delivery Fee: ₦{deliveryFee.toLocaleString()}</p>}
-                        </div>
-
+            <div className="space-y-3">
+                {orderType === 'delivery' && (
+                    <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
                         <div>
-                            <label className="text-[11px] font-bold text-gray-500 uppercase mb-1.5 block">Street Address</label>
-                            <input className="w-full p-3.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500 outline-none placeholder-gray-400" placeholder="e.g. 12 Mission Road" value={form.address} onChange={e => setForm({...form, address: e.target.value})} />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                            <div>
-                                <label className="text-[11px] font-bold text-gray-500 uppercase mb-1.5 block">Phone</label>
-                                <input type="tel" className="w-full p-3.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500 outline-none" placeholder="080..." value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
+                            <div className="flex justify-between items-center mb-1">
+                                <label className="text-xs font-bold text-gray-500">Delivery Area</label>
+                                <button onClick={handleUseGPS} className="text-xs text-orange-500 font-bold flex items-center gap-1"><Navigation className="w-3 h-3"/> Use GPS</button>
                             </div>
-                            <div>
-                                <label className="text-[11px] font-bold text-gray-500 uppercase mb-1.5 block">Landmark</label>
-                                <input className="w-full p-3.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-orange-500 outline-none" placeholder="Optional" value={form.landmark} onChange={e => setForm({...form, landmark: e.target.value})} />
-                            </div>
+                            <select className="w-full bg-white dark:bg-gray-700 p-2 rounded border dark:border-gray-600 dark:text-white" value={form.deliveryArea} onChange={e => setForm({...form, deliveryArea: e.target.value})}><option value="">Select...</option>{LOCATIONS.map(l => <option key={l} value={l}>{l}</option>)}</select>
+                            {form.deliveryArea && <p className="text-xs text-orange-500 mt-1">Delivery: ₦{deliveryFee}</p>}
                         </div>
+                        <div><label className="text-xs font-bold text-gray-500">Address</label><input className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Street" value={form.address} onChange={e => setForm({...form, address: e.target.value})} /></div>
                     </div>
-                </div>
-
-                {/* Payment Method */}
-                <div className="space-y-4">
-                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                        <CreditCard className="w-4 h-4" /> Payment Method
-                    </h4>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => setActiveMethod('paystack')} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 relative ${activeMethod === 'paystack' ? 'border-green-500 bg-green-50/50 dark:bg-green-900/10 text-green-700 dark:text-green-400 shadow-sm' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-400 hover:border-gray-200'}`}>
-                            {activeMethod === 'paystack' && <div className="absolute top-2 right-2 text-green-500"><CheckCircle className="w-4 h-4" /></div>}
-                            <CreditCard className={`w-6 h-6 ${activeMethod === 'paystack' ? 'text-green-500' : 'text-gray-300'}`} />
-                            <span className="font-bold text-xs">Paystack</span>
-                        </button>
-                        <button onClick={() => setActiveMethod('crypto')} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 relative ${activeMethod === 'crypto' ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/10 text-indigo-700 dark:text-indigo-400 shadow-sm' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-400 hover:border-gray-200'}`}>
-                            {activeMethod === 'crypto' && <div className="absolute top-2 right-2 text-indigo-500"><CheckCircle className="w-4 h-4" /></div>}
-                            <Wallet className={`w-6 h-6 ${activeMethod === 'crypto' ? 'text-indigo-500' : 'text-gray-300'}`} />
-                            <span className="font-bold text-xs">Crypto</span>
-                        </button>
-                    </div>
-                </div>
-
-                {/* Total */}
-                <div className="pt-4 border-t border-dashed border-gray-200 dark:border-gray-800">
-                    <div className="flex justify-between items-center mb-2"><span className="text-gray-500 text-sm">Subtotal</span><span className="font-bold text-gray-900 dark:text-white">₦{total.toLocaleString()}</span></div>
-                    <div className="flex justify-between items-center mb-4"><span className="text-gray-500 text-sm">Delivery Fee</span><span className="font-bold text-gray-900 dark:text-white">₦{deliveryFee.toLocaleString()}</span></div>
-                    <div className="flex justify-between items-center p-4 bg-orange-50 dark:bg-orange-900/20 rounded-xl border border-orange-100 dark:border-orange-900/30">
-                        <span className="font-bold text-orange-800 dark:text-orange-200 uppercase text-xs tracking-wider">Total Amount</span>
-                        <span className="text-2xl font-black text-orange-600 dark:text-orange-400">₦{grandTotal.toLocaleString()}</span>
-                    </div>
-                </div>
-            </div>
-
-            <div className="p-6 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 sticky bottom-0 z-10 pb-8 md:pb-6">
-                {activeMethod === 'paystack' ? ( 
-                    form.address && form.phone && form.deliveryArea ? 
-                    <PaystackButton {...paystackConfig} text={`Pay ₦${grandTotal.toLocaleString()}`} onSuccess={handlePaystackSuccess} onClose={() => alert("Payment Cancelled")} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-green-500/30 transition-all active:scale-95 flex justify-center items-center gap-2 text-lg" /> 
-                    : <button disabled className="w-full bg-gray-200 dark:bg-gray-800 text-gray-400 font-bold py-4 rounded-2xl cursor-not-allowed">Complete Delivery Details</button>
-                ) : (
-                    <button onClick={() => handlePayment('crypto')} disabled={processing} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-500/30 transition-all active:scale-95 text-lg">{processing ? 'Processing...' : `Transfer ₦${grandTotal.toLocaleString()}`}</button>
                 )}
+                <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
+                     <div className="flex gap-2"><div className="flex-1"><label className="text-xs font-bold text-gray-500">Phone</label><input type="tel" className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="080..." value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} /></div><div className="flex-1"><label className="text-xs font-bold text-gray-500">Landmark</label><input className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Optional" value={form.landmark} onChange={e => setForm({...form, landmark: e.target.value})} /></div></div>
+                </div>
             </div>
+            
+            {/* Payment Method */}
+            <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-1.5 rounded-xl flex gap-1">
+                <button onClick={() => setActiveMethod('paystack')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'paystack' ? 'bg-white dark:bg-gray-700 shadow text-green-600 dark:text-white' : 'text-gray-400'}`}>
+                    <div className="flex items-center justify-center gap-2"><CreditCard className="w-4 h-4" /> Paystack</div>
+                </button>
+                <button onClick={() => setActiveMethod('crypto')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'crypto' ? 'bg-indigo-500 text-white shadow' : 'text-gray-400'}`}>
+                    <div className="flex items-center justify-center gap-2"><Wallet className="w-4 h-4" /> Crypto</div>
+                </button>
+            </div>
+
+            <div className="flex justify-between items-center mt-6 pt-4 border-t dark:border-gray-700"><div className="text-sm text-gray-500">Total:</div><div className="text-2xl font-black text-green-600">₦{grandTotal.toLocaleString()}</div></div>
+            
+            {/* Order Summary in Modal */}
+            <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
+                <p className="text-[10px] text-gray-400 font-bold uppercase mb-2">Order Summary</p>
+                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                    {cart.map((item, i) => (
+                        <div key={i} className="flex-shrink-0 w-12 h-12 bg-white dark:bg-gray-700 rounded-lg flex items-center justify-center text-xl shadow-sm border border-gray-100 dark:border-gray-600 overflow-hidden">
+                            {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" /> : item.image}
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {activeMethod === 'paystack' ? (
+                (orderType === 'delivery' && (!form.address || !form.deliveryArea)) ?
+                <button disabled className="w-full mt-4 bg-gray-300 dark:bg-gray-700 text-white font-bold py-4 rounded-xl cursor-not-allowed">Enter Delivery Details</button> :
+                <PaystackButton {...paystackConfig} text="Pay Now" onSuccess={handlePaystackSuccess} onClose={() => alert("Payment Cancelled")} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg" />
+            ) : (<button onClick={() => handlePayment()} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Confirm Crypto Transfer'}</button>)}
         </div>
     </div>
   );
 };
 
 export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeFromCart, cartTotal, globalWallet, user, setCart, city }) => {
+  const [paymentMethod, setPaymentMethod] = useState('paystack');
   const [showModal, setShowModal] = useState(false);
   return (
   <>
-  <PaymentModal isOpen={showModal} onClose={() => setShowModal(false)} total={cartTotal} paymentMethod="paystack" user={user} cart={cart} globalWallet={globalWallet} onSuccess={() => {setShowModal(false); setCart([]); setCurrentView('orders'); alert("Order Placed!");}} city={city} />
+  <PaymentModal isOpen={showModal} onClose={() => setShowModal(false)} total={cartTotal} paymentMethod={paymentMethod} user={user} cart={cart} globalWallet={globalWallet} onSuccess={() => {setShowModal(false); setCart([]); setCurrentView('orders'); alert("Order Placed!");}} city={city} />
   <div className="fixed inset-0 z-50 flex justify-end pointer-events-none">
     <div className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${currentView === 'cart' ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`} onClick={() => setCurrentView(marketSection ? 'market' : 'home')} />
-    <div className={`relative bg-white dark:bg-gray-900 shadow-2xl w-full max-w-md h-full flex flex-col pointer-events-auto transition-transform duration-300 ease-out transform ${currentView === 'cart' ? 'translate-x-0' : 'translate-x-full'}`}>
-      <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-white dark:bg-gray-900 z-10"><h2 className="text-2xl font-black dark:text-white tracking-tight">Your Cart</h2><button onClick={() => setCurrentView('home')} className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full hover:bg-gray-200 transition-colors"><X className="w-5 h-5 text-gray-500" /></button></div>
+    <div className={`relative bg-white dark:bg-gray-900 shadow-2xl w-full max-w-md h-full flex flex-col pointer-events-auto transition-transform duration-300 transform ${currentView === 'cart' ? 'translate-x-0' : 'translate-x-full'}`}>
+      <div className="p-6 border-b dark:border-gray-800 flex justify-between items-center"><h2 className="text-2xl font-bold dark:text-white">Cart</h2><button onClick={() => setCurrentView('home')}><X className="w-6 h-6" /></button></div>
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {cart.length === 0 ? <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-2"><ShoppingCart className="w-12 h-12 opacity-20"/><p className="font-medium">Your cart is empty</p></div> : 
+        {cart.length === 0 ? <div className="text-center text-gray-400 mt-10"><ShoppingCart className="w-16 h-16 mx-auto mb-4 opacity-20"/><p>Empty</p></div> : 
          cart.map(item => <div key={item.cartId} className="flex justify-between items-center bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><div className="flex gap-3"><span className="text-2xl">{item.imageUrl ? <img src={item.imageUrl} className="w-12 h-12 object-cover rounded-lg"/> : item.image}</span><div><p className="font-bold text-sm dark:text-white">{item.name}</p><p className="text-xs text-gray-500">₦{item.price.toLocaleString()}</p></div></div><button onClick={() => removeFromCart(item.cartId)} className="text-red-500"><Minus className="w-4 h-4" /></button></div>)}
       </div>
-      <div className="p-6 border-t dark:border-gray-800 bg-white dark:bg-gray-900 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20 pb-8">
-        <div className="flex justify-between items-end mb-4"><span className="text-gray-500 font-bold text-sm">Subtotal</span><span className="text-3xl font-black dark:text-white tracking-tight">₦{cartTotal.toLocaleString()}</span></div>
-        <button onClick={() => setShowModal(true)} disabled={cart.length === 0} className="w-full bg-gray-900 dark:bg-orange-600 text-white font-bold py-4 rounded-xl shadow-lg hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed">Checkout</button>
+      <div className="p-6 border-t dark:border-gray-800 bg-gray-50 dark:bg-gray-900 space-y-4">
+        <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="text-2xl font-black dark:text-white">₦{cartTotal.toLocaleString()}</span></div>
+        <button onClick={() => setShowModal(true)} disabled={cart.length === 0} className="w-full bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">Checkout</button>
       </div>
     </div>
   </div>

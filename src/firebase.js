@@ -21,7 +21,6 @@ import { VAPID_KEY } from "./config.js";
 
 
 
-
 // 🔴 PASTE YOUR FIREBASE CONFIG HERE 🔴
 const firebaseConfig = {
   apiKey: "AIzaSyBm5DntiyXX5PCWnNsMybJIC9UetJvyrz8",
@@ -46,6 +45,7 @@ export const messaging = getMessaging(app);
 // ==========================================
 // 1. AUTHENTICATION
 // ==========================================
+
 export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
@@ -87,9 +87,11 @@ export const logout = async () => { await signOut(auth); };
 // ==========================================
 // 2. USER & ADMIN DATA
 // ==========================================
+
 export const getAdminRole = async (email) => {
     if (!email) return null;
     try {
+        // Method 1: Check by Doc ID
         const docRef = doc(db, "admins", email);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
@@ -99,6 +101,7 @@ export const getAdminRole = async (email) => {
                 vendor: data.vendor || data.vendorName 
             };
         }
+        // Method 2: Check by email field
         const q = query(collection(db, "admins"), where("email", "==", email));
         const snapshot = await getDocs(q);
         if (!snapshot.empty) {
@@ -136,6 +139,7 @@ export const saveWalletToProfile = async (uid, address) => {
 // ==========================================
 // 3. IMAGES & VENDORS
 // ==========================================
+
 export const uploadImage = async (file) => {
   if (!file) return null;
   const formData = new FormData();
@@ -150,7 +154,14 @@ export const uploadImage = async (file) => {
 
 export const saveVendorLogo = async (vendorName, file) => {
     const url = await uploadImage(file);
-    if(url) { await setDoc(doc(db, "vendors", vendorName), { logo: url, name: vendorName }, { merge: true }); }
+    if(url) { 
+        // Auto-create or update vendor document
+        await setDoc(doc(db, "vendors", vendorName), { 
+            logo: url, 
+            name: vendorName, 
+            isActive: true 
+        }, { merge: true }); 
+    }
     return url;
 };
 
@@ -163,37 +174,40 @@ export const getVendorLogos = async () => {
     } catch(e) { return {}; }
 };
 
-// 🟢 NEW: RETURNS METADATA (HOURS) TOO
+// 🟢 CRITICAL: This fetches the vendors for the dropdown
 export const getGlobalVendors = async () => {
     try {
         const q = query(collection(db, "vendors"));
         const snapshot = await getDocs(q);
         const vendorsByLocation = {};
-        const vendorMetadata = {}; // Store open/close times here
+        const vendorMetadata = {};
         
         snapshot.docs.forEach(doc => {
             const data = doc.data();
             if (data.isActive !== false) { 
                 let rawLocs = data.location;
+                // Handle Comma-Separated String or Array or Missing
                 if (typeof rawLocs === 'string' && rawLocs.includes(',')) {
                     rawLocs = rawLocs.split(',').map(s => s.trim());
-                } else if (!Array.isArray(rawLocs)) {
-                    rawLocs = [rawLocs || "Irrua"];
+                }
+                else if (!Array.isArray(rawLocs)) {
+                    rawLocs = [rawLocs || "Irrua"]; // Default
                 }
                 
                 const locations = rawLocs.map(l => l.charAt(0).toUpperCase() + l.slice(1).toLowerCase());
                 
                 locations.forEach(loc => {
                     if (!vendorsByLocation[loc]) vendorsByLocation[loc] = [];
+                    // Avoid duplicates
                     if (!vendorsByLocation[loc].includes(doc.id)) {
                         vendorsByLocation[loc].push(doc.id);
                     }
                 });
 
-                // Store metadata (Times default to 8am - 10pm if missing)
+                // Store metadata
                 vendorMetadata[doc.id] = {
                     openTime: data.openTime || "08:00",
-                    closeTime: data.closeTime || "18:00",
+                    closeTime: data.closeTime || "22:00",
                     logo: data.logo
                 };
             }
@@ -206,14 +220,17 @@ export const getGlobalVendors = async () => {
 };
 
 // ==========================================
-// 4. ORDERS & PRODUCTS
+// 4. PRODUCTS & PAGINATION
 // ==========================================
+
 export const getPaginatedProducts = async (lastDoc = null, pageSize = 20) => {
     try {
         let q;
         if (lastDoc) {
+            // Load NEXT batch
             q = query(collection(db, "products"), limit(pageSize), startAfter(lastDoc));
         } else {
+            // Load FIRST batch
             q = query(collection(db, "products"), limit(pageSize));
         }
         
@@ -233,54 +250,62 @@ export const getAllProducts = async () => {
   return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 };
 
+// 🟢 UPDATED: Auto-create vendor when adding product
 export const addProduct = async (productData) => {
   await addDoc(collection(db, "products"), { ...productData, createdAt: new Date().toISOString() });
+  
+  if (productData.vendor) {
+      // Ensure vendor exists in DB so it shows in dropdown next time
+      const vendorRef = doc(db, "vendors", productData.vendor);
+      await setDoc(vendorRef, { 
+          name: productData.vendor, 
+          location: [productData.location || "Irrua"], 
+          isActive: true 
+      }, { merge: true });
+  }
 };
 
 export const updateProduct = async (id, data) => { await updateDoc(doc(db, "products", id), data); };
 export const deleteProduct = async (id) => { await deleteDoc(doc(db, "products", id)); };
 
-// 🟢 UPDATED: ACCEPTS ORDER TYPE (PICKUP/DELIVERY)
+// ==========================================
+// 5. ORDERS & REVIEWS
+// ==========================================
+
 export const createOrder = async (userId, cart, total, paymentMethod, walletAddress, address, transferName, phone, landmark, deliveryFee, status = 'pending', orderType = 'delivery') => {
   try {
     await runTransaction(db, async (transaction) => {
+      // 1. Group items
       const itemCounts = {};
       cart.forEach(item => {
           itemCounts[item.id] = (itemCounts[item.id] || 0) + 1;
       });
       const updates = []; 
       
+      // 2. Read
       for (const [productId, quantity] of Object.entries(itemCounts)) {
         const productRef = doc(db, "products", productId);
         const productDoc = await transaction.get(productRef);
         
-        if (!productDoc.exists()) throw `Item no longer available.`;
+        if (!productDoc.exists()) throw `One of the items in your cart no longer exists.`;
         
         const currentStock = productDoc.data().stock;
-        if (currentStock < quantity) throw `Not enough stock for "${productDoc.data().name}".`;
+        if (currentStock < quantity) throw `Sorry! Not enough stock for "${productDoc.data().name}". Only ${currentStock} left.`;
         
         updates.push({ ref: productRef, newStock: currentStock - quantity });
       }
 
+      // 3. Write
       updates.forEach(update => {
           transaction.update(update.ref, { stock: update.newStock });
       });
 
       const newOrderRef = doc(collection(db, "orders"));
       transaction.set(newOrderRef, {
-        userId, 
-        items: cart, 
-        total: parseFloat(total), 
-        paymentMethod, 
-        walletAddress: walletAddress || null, 
-        deliveryAddress: orderType === 'pickup' ? 'PICKUP' : address, 
-        phone, 
-        landmark: orderType === 'pickup' ? 'PICKUP' : landmark, 
-        deliveryFee, 
-        transferName: transferName || null,
-        status: status,
-        orderType: orderType, // 🟢 New Field
-        createdAt: new Date().toISOString()
+        userId, items: cart, total: parseFloat(total), paymentMethod, 
+        walletAddress: walletAddress || null, deliveryAddress: orderType === 'pickup' ? 'PICKUP' : address, 
+        phone, landmark: orderType === 'pickup' ? 'PICKUP' : landmark, deliveryFee, 
+        transferName: transferName || null, status: status, orderType, createdAt: new Date().toISOString()
       });
     });
   } catch (e) { 
@@ -322,8 +347,10 @@ export const addReview = async (productId, userId, userName, rating, comment, or
                 const data = productDoc.data();
                 const oldRatingCount = data.ratingCount || 0;
                 const oldAverage = data.rating || 0;
+
                 const newRatingCount = oldRatingCount + 1;
                 const newAverage = ((oldAverage * oldRatingCount) + rating) / newRatingCount;
+
                 transaction.update(productRef, { rating: parseFloat(newAverage.toFixed(1)), ratingCount: newRatingCount });
             }
         });
@@ -337,9 +364,10 @@ export const addReview = async (productId, userId, userName, rating, comment, or
 // ==========================================
 // 6. NOTIFICATIONS & ALERTS
 // ==========================================
+
 export const requestNotificationPermission = async (userId, role, vendorName) => {
   try {
-    if (!('Notification' in window)) return alert("Notifications not supported.");
+    if (!('Notification' in window)) return alert("Notifications not supported on this device.");
     
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
@@ -347,10 +375,15 @@ export const requestNotificationPermission = async (userId, role, vendorName) =>
       const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration }); 
       
       if(userId && token) {
+          // Save to User Profile
           await setDoc(doc(db, "users", userId), { fcmToken: token }, { merge: true });
+          
+          // Save to Logistics Group
           if (role === 'logistics' || role === 'super') {
              await setDoc(doc(db, "notifications", "logistics_group"), { [userId]: token }, { merge: true });
           }
+
+          // Save to Vendor Group
           if ((role === 'sub' || role === 'vendor') && vendorName) {
              await setDoc(doc(db, "notifications", vendorName), { token: token, email: userId }, { merge: true });
           }
@@ -358,7 +391,7 @@ export const requestNotificationPermission = async (userId, role, vendorName) =>
       }
       return token;
     } else {
-        alert("Notifications denied.");
+        alert("Notifications denied. Please enable them in browser settings.");
     }
   } catch (error) { 
       console.error("Notification Error:", error); 
@@ -394,5 +427,6 @@ export const saveStockRequest = async (item, userId, userEmail) => {
 // ==========================================
 // 7. EXPORTS
 // ==========================================
+
 export { collection, query, where, onSnapshot, orderBy, limit, startAfter };
 export const seedDatabase = async () => { console.log("Seeding available."); };

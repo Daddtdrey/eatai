@@ -2,11 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { 
   ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share 
 } from 'lucide-react';
-// 🟢 FIX: Use ./firebase.js (Current folder) not ../firebase.js
 import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors } from './firebase.js'; 
 import { onAuthStateChanged } from 'firebase/auth';
 
-// 🟢 FIX: Use ./components (Current folder)
+// 🟢 IMPORT MODULES
 import { Toast } from './components/UI.jsx';
 import { 
     LoginView, HomeView, LocationSelectionView, VendorSelectionView, 
@@ -23,19 +22,21 @@ export default function EatAi() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   
-  // 2. Data State
+  // 2. Data State (Pagination & Vendors)
   const [marketData, setMarketData] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [vendorLogos, setVendorLogos] = useState({});
+  
+  // 🟢 Dynamic Vendors & Metadata (Hours)
   const [vendorsByLocation, setVendorsByLocation] = useState(FALLBACK_VENDORS);
   const [vendorMetadata, setVendorMetadata] = useState({}); 
 
-  // Pagination State
+  // 🟢 Pagination State
   const [lastDoc, setLastDoc] = useState(null);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-  // 3. User Preferences
+  // 3. User Preferences (Persisted)
   const [city, setCity] = useState(localStorage.getItem('eatai_city') || null);
   const [vendor, setVendor] = useState(localStorage.getItem('eatai_vendor') || null);
   const [cart, setCart] = useState(() => { 
@@ -53,7 +54,7 @@ export default function EatAi() {
 
   // 4. UI State
   const [notification, setNotification] = useState(null);
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [deferredPrompt, setDeferredPrompt] = useState(null); 
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
 
@@ -72,6 +73,7 @@ export default function EatAi() {
   useEffect(() => { localStorage.setItem('eatai_view', currentView); }, [currentView]);
   useEffect(() => { localStorage.setItem('eatai_cart', JSON.stringify(cart)); }, [cart]);
   
+  // Dark Mode Effect
   useEffect(() => { 
       localStorage.setItem('eatai_dark_mode', JSON.stringify(darkMode));
       if (darkMode) {
@@ -98,8 +100,9 @@ export default function EatAi() {
       return () => u(); 
   }, []);
 
-  // Install Prompt Listener
+  // 🟢 INSTALL PROMPT LISTENER
   useEffect(() => {
+    // Detect iOS
     const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream;
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
     
@@ -108,6 +111,7 @@ export default function EatAi() {
         setTimeout(() => setShowInstallBanner(true), 3000);
     }
 
+    // Detect Android
     const handler = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -117,19 +121,21 @@ export default function EatAi() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
-  // Data Loading
+  // 🟢 DATA LOADING (Pagination + Dynamic Vendors)
   useEffect(() => { 
       const fetchData = async () => {
           try {
-            // 1. Products (Paginated)
+            // 1. Products (Paginated - Fetch first 20)
             const { data, lastVisible } = await getPaginatedProducts(null);
             setMarketData(data);
             setLastDoc(lastVisible);
             setHasMore(data.length === 20);
 
-            // 2. Vendors (Dynamic)
+            // 2. Vendors (Dynamic from DB)
             const result = await getGlobalVendors();
+            
             if (result && result.vendorsByLocation) {
+                // Merge dynamic vendors with fallback config so nothing is lost
                 const mergedVendors = { ...FALLBACK_VENDORS };
                 Object.keys(result.vendorsByLocation).forEach(loc => {
                     const existing = mergedVendors[loc] || [];
@@ -138,6 +144,7 @@ export default function EatAi() {
                 });
                 setVendorsByLocation(mergedVendors);
                 
+                // Save Metadata (Hours, Logos)
                 if (result.vendorMetadata) {
                     setVendorMetadata(result.vendorMetadata);
                 }
@@ -153,6 +160,7 @@ export default function EatAi() {
       fetchData();
   }, []);
 
+  // 🟢 LOAD MORE HANDLER (For Infinite Scroll in Market)
   const handleLoadMore = async () => {
       if (isLoadingMore || !hasMore) return;
       setIsLoadingMore(true);
@@ -165,10 +173,12 @@ export default function EatAi() {
       setIsLoadingMore(false);
   };
 
+  // Role Checking
   useEffect(() => {
       const checkRole = async () => {
           if(!user) return;
           try {
+             // 1. Check Database for Role
              const roleData = await getAdminRole(user.email);
              if(roleData) {
                  const foundRole = roleData.role || roleData.type;
@@ -177,6 +187,7 @@ export default function EatAi() {
                      setMyVendorName(roleData.vendor || roleData.vendorName);
                  }
              } else {
+                 // 2. Fallback Configuration
                  const email = user.email.toLowerCase();
                  if(SUPER_ADMINS.includes(email)) setRole('super');
                  else if(LOGISTICS_EMAILS.includes(email)) setRole('logistics');
@@ -203,6 +214,7 @@ export default function EatAi() {
   const isAdmin = role === 'super' || role === 'sub' || role === 'vendor';
   const isLogistics = role === 'logistics';
 
+  // 🟢 INSTALL APP HANDLER
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
@@ -242,6 +254,7 @@ export default function EatAi() {
         
         {notification && <Toast message={notification} />}
 
+        {/* 🟢 SMART INSTALL BANNER */}
         {showInstallBanner && (
           <div className="fixed top-0 left-0 right-0 z-50 bg-orange-600 text-white p-4 shadow-lg animate-slide-down flex justify-between items-center">
             <div className="flex items-center gap-3">
@@ -253,6 +266,7 @@ export default function EatAi() {
             </div>
             <div className="flex gap-2">
                 <button onClick={() => setShowInstallBanner(false)} className="p-2 text-orange-200 hover:text-white"><X className="w-5 h-5"/></button>
+                {/* Only show 'Install' button on Android. iOS requires manual action. */}
                 {!isIOS && <button onClick={handleInstallClick} className="bg-white text-orange-600 px-4 py-2 rounded-lg text-xs font-bold shadow-sm">Install</button>}
                 {isIOS && <div className="animate-bounce"><Share className="w-5 h-5"/></div>}
             </div>
@@ -283,6 +297,7 @@ export default function EatAi() {
         <main className="flex-1 overflow-hidden relative flex flex-col">
             {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} />}
             
+            {/* 🟢 PASS LOCATIONS */}
             {currentView === 'location' && 
                 <LocationSelectionView 
                     setCity={setCity} 
@@ -291,6 +306,7 @@ export default function EatAi() {
                 />
             }
             
+            {/* 🟢 PASS DYNAMIC VENDORS */}
             {currentView === 'vendors' && 
                 <VendorSelectionView 
                     city={city} 
@@ -301,6 +317,7 @@ export default function EatAi() {
                 />
             }
             
+            {/* 🟢 MARKET VIEW: Pagination + Metadata (Hours) */}
             {currentView === 'market' && 
                 <MarketView 
                     setCurrentView={setCurrentView} 
@@ -310,7 +327,7 @@ export default function EatAi() {
                     city={city} 
                     vendor={vendor} 
                     user={user} 
-                    vendorMetadata={vendorMetadata}
+                    vendorMetadata={vendorMetadata} 
                     onLoadMore={handleLoadMore}
                     hasMore={hasMore}
                     isLoadingMore={isLoadingMore}
@@ -335,6 +352,7 @@ export default function EatAi() {
                 />
             }
             
+            {/* 🟢 DASHBOARDS: Pass dynamic vendors for Super Admin Dropdown */}
             {currentView === 'admin' && isAdmin && 
                 <AdminView 
                     setCurrentView={setCurrentView} 
@@ -347,6 +365,7 @@ export default function EatAi() {
                     }} 
                     user={user} 
                     setNotification={setNotification} 
+                    vendorsByLocation={vendorsByLocation} 
                 />
             }
             {currentView === 'logistics' && isLogistics && 

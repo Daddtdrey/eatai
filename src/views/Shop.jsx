@@ -8,16 +8,18 @@ import {
 import { PaystackButton } from 'react-paystack';
 import { ethers } from 'ethers';
 
-// 🟢 IMPORTS: Removed explicit extensions to let bundler resolve them
-import { ViewContainer, DietaryFilter, ProductCard, OrderDetailModal, Toast } from '../components/UI';
+// 🟢 IMPORTS
+import { ViewContainer, DietaryFilter, ProductCard, OrderDetailModal, Toast } from '../components/UI.jsx';
 import { 
     signInWithGoogle, createOrder, getUserOrders, saveUserProfile, getUserProfile, 
     db, collection, onSnapshot, query, where, saveWalletToProfile, requestNotificationPermission,
     signUpWithEmail, logInWithEmail, saveStockRequest
-} from '../firebase';
-import { LOCATIONS, VENDORS_BY_LOCATION, PAYSTACK_KEY, BANK_DETAILS, calculateDeliveryFee, GEMINI_API_KEY } from '../config';
+} from '../firebase.js';
+import { LOCATIONS, VENDORS_BY_LOCATION, PAYSTACK_KEY, BANK_DETAILS, calculateDeliveryFee, GEMINI_API_KEY, DELIVERY_ZONES } from '../config.js';
 
-// --- 1. LOGIN VIEW ---
+// ==========================================
+// 1. 🟢 REDESIGNED LOGIN VIEW (Full Screen + Background)
+// ==========================================
 export const LoginView = () => {
     const [isSignUp, setIsSignUp] = useState(false);
     const [email, setEmail] = useState('');
@@ -33,54 +35,67 @@ export const LoginView = () => {
         try {
             if (isSignUp) { await signUpWithEmail(email, password, name); } 
             else { await logInWithEmail(email, password); }
-        } catch (err) { setError("Authentication failed. Check your details."); } 
+        } catch (err) { 
+            console.error(err);
+            setError("Authentication failed. Please check your credentials."); 
+        } 
         finally { setLoading(false); }
     };
 
     return (
-        <div className="flex flex-col items-center justify-center h-full p-6 text-center animate-fade-in bg-slate-50 dark:bg-gray-950 overflow-y-auto">
-            <div className="w-full max-w-sm">
-                 <div className="w-24 h-24 bg-orange-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-6 mx-auto animate-bounce shadow-orange-200 dark:shadow-none shadow-lg">
-                    <ChefHat className="w-12 h-12 text-orange-500" />
+        // 🟢 FULL SCREEN BACKGROUND CONTAINER
+        <div className="fixed inset-0 min-h-screen w-full bg-cover bg-center flex items-center justify-center z-50" 
+             style={{ backgroundImage: "url('https://images.unsplash.com/photo-1504674900247-0877df9cc836?q=80&w=2070&auto=format&fit=crop')" }}>
+            
+            {/* Dark Overlay for readability */}
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px]"></div>
+
+            {/* Login Card */}
+            <div className="relative z-10 w-full max-w-sm p-8 bg-white/10 backdrop-blur-md border border-white/20 rounded-3xl shadow-2xl animate-fade-in mx-4">
+                 
+                 <div className="flex flex-col items-center mb-6">
+                     <div className="w-20 h-20 bg-orange-500 rounded-full flex items-center justify-center mb-4 shadow-lg shadow-orange-500/30">
+                        <ChefHat className="w-10 h-10 text-white" />
+                     </div>
+                     <h1 className="text-3xl font-black text-white tracking-tight font-[Fredoka]">EatAi</h1>
+                     <p className="text-gray-300 text-sm font-medium">Smart Food Delivery</p>
                  </div>
-                 <h1 className="text-4xl font-black text-gray-800 dark:text-white mb-2 tracking-tight font-[Fredoka]">EatAi</h1>
-                 <p className="text-gray-500 dark:text-gray-400 mb-8 font-medium">Smart Food Delivery</p>
 
                  <form onSubmit={handleSubmit} className="space-y-4 mb-6">
                     {isSignUp && (
                         <div className="relative">
                             <User className="absolute left-3 top-3.5 w-5 h-5 text-gray-400" />
-                            <input type="text" placeholder="Full Name" className="w-full pl-10 p-3.5 rounded-2xl border border-gray-200 dark:border-gray-700 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500 outline-none transition-all" value={name} onChange={(e) => setName(e.target.value)} required />
+                            <input type="text" placeholder="Full Name" className="w-full pl-10 p-3.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 outline-none transition-all" value={name} onChange={(e) => setName(e.target.value)} required />
                         </div>
                     )}
                     <div className="relative">
                         <Mail className="absolute left-3 top-3.5 w-5 h-5 text-gray-400" />
-                        <input type="email" placeholder="Email" className="w-full pl-10 p-3.5 rounded-2xl border border-gray-200 dark:border-gray-700 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500 outline-none transition-all" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                        <input type="email" placeholder="Email" className="w-full pl-10 p-3.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 outline-none transition-all" value={email} onChange={(e) => setEmail(e.target.value)} required />
                     </div>
                     <div className="relative">
                         <Lock className="absolute left-3 top-3.5 w-5 h-5 text-gray-400" />
-                        <input type="password" placeholder="Password" className="w-full pl-10 p-3.5 rounded-2xl border border-gray-200 dark:border-gray-700 dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500 outline-none transition-all" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                        <input type="password" placeholder="Password" className="w-full pl-10 p-3.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 outline-none transition-all" value={password} onChange={(e) => setPassword(e.target.value)} required />
                     </div>
                     
-                    {error && <p className="text-red-500 text-xs font-bold bg-red-50 p-3 rounded-xl">{error}</p>}
+                    {error && <p className="text-red-400 text-xs font-bold text-center bg-red-500/10 p-2 rounded-lg">{error}</p>}
 
-                    <button disabled={loading} className="w-full bg-orange-500 text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-orange-500/30 hover:bg-orange-600 transition-all active:scale-95 disabled:opacity-70">
+                    <button disabled={loading} className="w-full bg-orange-500 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-orange-500/30 hover:bg-orange-600 transition-all active:scale-95 disabled:opacity-70">
                         {loading ? 'Processing...' : (isSignUp ? 'Create Account' : 'Sign In')}
                     </button>
                  </form>
 
                  <div className="relative mb-6">
-                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200 dark:border-gray-800"></div></div>
-                    <div className="relative flex justify-center text-sm"><span className="px-3 bg-slate-50 dark:bg-gray-950 text-gray-400 font-medium">Or</span></div>
+                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/20"></div></div>
+                    <div className="relative flex justify-center text-sm"><span className="px-3 bg-transparent text-gray-400 font-medium bg-black/40 rounded">Or</span></div>
                  </div>
 
-                 <button onClick={signInWithGoogle} className="w-full bg-white dark:bg-gray-900 text-gray-700 dark:text-white border border-gray-200 dark:border-gray-700 font-bold py-3.5 rounded-2xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-all flex items-center justify-center gap-2 shadow-sm">
+                 <button onClick={signInWithGoogle} className="w-full bg-white text-gray-900 border border-gray-200 font-bold py-3.5 rounded-xl hover:bg-gray-100 transition-all flex items-center justify-center gap-2 shadow-sm">
                     <LogIn className="w-5 h-5" /> Continue with Google
                  </button>
 
-                 <p className="mt-8 text-sm text-gray-500 font-medium">
+                 <p className="mt-6 text-sm text-gray-300 text-center font-medium">
                     {isSignUp ? "Already have an account?" : "New to EatAi?"} 
-                    <button type="button" onClick={() => setIsSignUp(!isSignUp)} className="ml-1 text-orange-500 font-bold hover:underline">
+                    <button type="button" onClick={() => setIsSignUp(!isSignUp)} className="ml-1 text-orange-400 font-bold hover:text-orange-300 underline">
                         {isSignUp ? "Sign In" : "Sign Up"}
                     </button>
                  </p>
@@ -89,7 +104,7 @@ export const LoginView = () => {
     );
 };
 
-// --- 2. HOME VIEW (UPDATED BANNER) ---
+// --- 2. HOME VIEW (HUNGRY ORANGE THEME) ---
 export const HomeView = ({ setCurrentView, user }) => {
     const [hasPermission, setHasPermission] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -107,13 +122,12 @@ export const HomeView = ({ setCurrentView, user }) => {
 
     // Mock Data for Top Vendors
     const allTopVendors = [
-        { name: 'Bigtaste', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768122908/big_taste_pic_c70r4v.jpg', tags: 'Rice • Pasta' },
-        { name: 'Open Hall', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768247254/e27a4708yer6r8roladp.jpg', tags: 'food' },
-        { name: 'Phattie Chopbox', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1766433503/Screenshot_2025-12-22_115720_jgc2vy.png', tags: 'food' },
-        { name: 'Golden Bite', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768470565/goldenbite_mh6jsf.jpg', tags: 'Snacks' }
+        { name: 'Big taste', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768247815/ve99pcvok1pzrzdrfll4.jpg', tags: 'Rice • Pasta' },
+        { name: 'DannyCook', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768584381/emfhjczjmg2pfhxwqem2.jpg', tags: 'Grill • Chicken' },
+        { name: 'Phattie ChopBox', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1765371009/nwz7xt7g5cuuallmrpt0.jpg', tags: 'Snacks' },
+        { name: 'Yummy You', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768288363/eiic6wvc1qdhbnpgcqst.jpg', tags: 'Snacks' }
     ];
 
-    // Search Logic
     const filteredVendors = allTopVendors.filter(v => 
         v.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
@@ -124,7 +138,7 @@ export const HomeView = ({ setCurrentView, user }) => {
     return (
         <div className="flex flex-col h-full animate-fade-in pb-32 bg-gray-50 dark:bg-gray-950 overflow-y-auto">
             
-            {/* HEADER & SEARCH */}
+            {/* HEADER */}
             <div className="px-6 pt-6 pb-4 bg-white dark:bg-gray-900 sticky top-0 z-10 border-b border-gray-100 dark:border-gray-800 rounded-b-3xl shadow-sm">
                 <div className="flex justify-between items-center mb-4">
                     <div>
@@ -153,7 +167,7 @@ export const HomeView = ({ setCurrentView, user }) => {
 
             <div className="p-6 space-y-6">
                 
-                {/* HERO BANNER (ORANGE) */}
+                {/* HERO BANNER */}
                 <div className="relative w-full h-60 bg-gradient-to-r from-orange-500 to-red-600 rounded-[2.5rem] overflow-hidden shadow-xl shadow-orange-500/30 flex items-center group cursor-pointer transition-transform active:scale-[0.99]" onClick={() => setCurrentView('location')}>
                     <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
                     
@@ -166,10 +180,10 @@ export const HomeView = ({ setCurrentView, user }) => {
                     {/* BIG FOOD IMAGES */}
                     <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767032932/Nigerian_Jollof_rice__fried_plantains_and_chicken_-removebg-preview_jthyvl.png" className="absolute -right-10 -bottom-8 w-64 h-64 object-contain drop-shadow-2xl transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 z-20" alt="Burger" />
                     <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767041008/These_Bold_Burger_Bowls_are_the_ultimate_low-carb_-removebg-preview_kjodwx.png" className="absolute right-36 top-6 w-24 h-24 object-contain opacity-90 rotate-12 z-10 blur-[1px]" alt="Pizza" />
-                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768585000/smlxto11vt60fjwrxluc.jpg" className="absolute right-48 -bottom-8 w-28 h-28 object-contain opacity-70 -rotate-12 z-10" alt="Drink" />
+                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768247775/eehmrhpaeb21zurbyfab.jpg" className="absolute right-48 -bottom-8 w-28 h-28 object-contain opacity-70 -rotate-12 z-10" alt="Drink" />
                 </div>
 
-                {/* TOP VENDORS LIST */}
+                {/* TOP VENDORS */}
                 <div>
                     <div className="flex justify-between items-center mb-3">
                         <h3 className="text-gray-900 dark:text-white font-bold text-lg font-[Fredoka]">Top Vendors</h3>
@@ -188,9 +202,6 @@ export const HomeView = ({ setCurrentView, user }) => {
                                  </div>
                              </div>
                          ))}
-                         {filteredVendors.length === 0 && (
-                             <p className="text-center text-gray-400 text-sm py-4">No vendors found matching "{searchQuery}"</p>
-                         )}
                     </div>
                 </div>
 
@@ -290,17 +301,16 @@ export const VendorSelectionView = ({ city, setVendor, setCurrentView, vendorLog
                         <ArrowLeft className="w-5 h-5 text-gray-300 group-hover:text-orange-500 rotate-180 transition-colors" />
                     </button>
                 ))}
-                {vendors.length === 0 && <p className="text-center text-gray-400 mt-10">No vendors found in this area yet.</p>}
             </div>
         </ViewContainer>
     );
 };
 
-// --- 5. MARKET VIEW ---
+// --- 5. MARKET VIEW (WITH OPENING HOURS CHECK) ---
 export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData, city, vendor, user, vendorMetadata, onLoadMore, hasMore, isLoadingMore }) => {
     const [category, setCategory] = useState('All');
     
-    // Check Hours
+    // 🟢 CHECK HOURS
     const currentHour = new Date().getHours();
     const currentMinute = new Date().getMinutes();
     const currentTime = currentHour + (currentMinute / 60);
@@ -335,7 +345,7 @@ export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData,
     
     return (
         <ViewContainer title={`${vendor} Menu`} showBack onBack={() => setCurrentView('vendors')}>
-            {/* CLOSED BANNER */}
+            {/* 🟢 CLOSED BANNER */}
             {!isOpen && (
                 <div className="bg-red-500 text-white p-3 rounded-xl mb-4 flex items-center justify-between shadow-md">
                     <div className="flex items-center gap-2">
@@ -352,12 +362,12 @@ export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData,
                     <ProductCard 
                         key={item.id} 
                         item={item} 
-                        addToCart={isOpen ? addToCart : () => alert("Vendor is currently closed.")} 
+                        addToCart={isOpen ? addToCart : () => alert("Vendor is currently closed.")} // 🟢 PREVENT ORDER IF CLOSED
                         isAdmin={false} 
                         onNotify={handleNotify} 
                     />
                 ))}
-                {/* LOAD MORE */}
+                {/* 🟢 LOAD MORE BUTTON */}
                 {hasMore && (
                     <button onClick={onLoadMore} disabled={isLoadingMore} className="w-full py-3 bg-gray-100 dark:bg-gray-800 text-gray-500 font-bold rounded-xl mt-4 active:scale-95">
                         {isLoadingMore ? "Loading..." : "Load More Food 🍲"}
@@ -422,7 +432,7 @@ export const WalletView = ({ setCurrentView, user, setGlobalWallet }) => {
     setIsLoading(true);
     setError(null);
     try {
-        await new Promise(resolve => setTimeout(resolve, 100)); 
+        await new Promise(resolve => setTimeout(resolve, 100)); // UI Breath
         const w = ethers.Wallet.createRandom();
         const wd = { address: w.address, privateKey: w.privateKey, mnemonic: w.mnemonic?.phrase };
         localStorage.setItem(`eatai_wallet_${user.uid}`, JSON.stringify(wd));
@@ -485,13 +495,16 @@ export const DeciderView = ({ ingredients, setIngredients, generateRecipes, isTh
     </ViewContainer>
 );
 
-// --- 9. CHECKOUT MODALS (WITH PICKUP & SUMMARY) ---
+// --- 9. CHECKOUT MODALS (WITH PICKUP & ZONES) ---
 export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city }) => {
   if (!isOpen) return null;
   const [processing, setProcessing] = useState(false);
   const [orderType, setOrderType] = useState('delivery'); 
-  const [form, setForm] = useState({ transferName: '', address: '', phone: '', landmark: '', deliveryArea: '' });
+  const [form, setForm] = useState({ transferName: '', address: '', phone: '', landmark: '', deliveryAreaName: '' });
   const [activeMethod, setActiveMethod] = useState(paymentMethod || 'paystack');
+  
+  // 🟢 NEW: Get Zones for Current City
+  const availableZones = DELIVERY_ZONES[city] || [];
   
   // GPS
   const handleUseGPS = () => {
@@ -510,16 +523,15 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
     }
   }, [user, isOpen]);
 
-  // Pickup = Free Delivery
-  const deliveryFee = orderType === 'pickup' ? 0 : calculateDeliveryFee(city, form.deliveryArea);
+  // 🟢 NEW: Use zone name to get price
+  const deliveryFee = orderType === 'pickup' ? 0 : calculateDeliveryFee(city, form.deliveryAreaName);
   const grandTotal = total + deliveryFee;
   
   const paystackConfig = { reference: (new Date()).getTime().toString(), email: user.email, amount: grandTotal * 100, publicKey: PAYSTACK_KEY };
   const handlePaystackSuccess = (reference) => { handlePayment("paystack"); };
 
   const handlePayment = async (method = activeMethod) => {
-    // Validate only if Delivery
-    if (orderType === 'delivery' && (!form.address || !form.phone || !form.deliveryArea)) return alert("Please select a Delivery Area and enter address.");
+    if (orderType === 'delivery' && (!form.address || !form.phone || !form.deliveryAreaName)) return alert("Please select a Delivery Area and enter address.");
     
     setProcessing(true);
     if (method !== 'paystack') await new Promise(r => setTimeout(r, 1500));
@@ -547,33 +559,29 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
                     <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
                         <div>
                             <div className="flex justify-between items-center mb-1">
-                                <label className="text-xs font-bold text-gray-500">Delivery Area</label>
+                                <label className="text-xs font-bold text-gray-500">Delivery Zone</label>
                                 <button onClick={handleUseGPS} className="text-xs text-orange-500 font-bold flex items-center gap-1"><Navigation className="w-3 h-3"/> Use GPS</button>
                             </div>
-                            <select className="w-full bg-white dark:bg-gray-700 p-2 rounded border dark:border-gray-600 dark:text-white" value={form.deliveryArea} onChange={e => setForm({...form, deliveryArea: e.target.value})}><option value="">Select...</option>{LOCATIONS.map(l => <option key={l} value={l}>{l}</option>)}</select>
-                            {form.deliveryArea && <p className="text-xs text-orange-500 mt-1">Delivery: ₦{deliveryFee}</p>}
+                            {/* 🟢 NEW: ZONE DROPDOWN */}
+                            <select 
+                                className="w-full bg-white dark:bg-gray-700 p-2 rounded border dark:border-gray-600 dark:text-white mt-1" 
+                                value={form.deliveryAreaName} 
+                                onChange={e => setForm({...form, deliveryAreaName: e.target.value})}
+                            >
+                                <option value="">Select Area...</option>
+                                {availableZones.map((zone, i) => <option key={i} value={zone.name}>{zone.name} - ₦{zone.price}</option>)}
+                            </select>
+                            {form.deliveryAreaName && <p className="text-xs text-orange-500 mt-1">Fee: ₦{deliveryFee}</p>}
                         </div>
                         <div><label className="text-xs font-bold text-gray-500">Address</label><input className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Street" value={form.address} onChange={e => setForm({...form, address: e.target.value})} /></div>
                     </div>
                 )}
                 <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
-                     <div className="flex gap-2"><div className="flex-1"><label className="text-xs font-bold text-gray-500">Phone</label><input type="tel" className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="080..." value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} /></div><div className="flex-1"><label className="text-xs font-bold text-gray-500">Landmark</label><input className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Optional" value={form.landmark} onChange={e => setForm({...form, landmark: e.target.value})} /></div></div>
+                     <div className="flex gap-2"><div className="flex-1"><label className="text-xs font-bold text-gray-500">Phone</label><input type="tel" className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="080..." value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} /></div></div>
                 </div>
             </div>
             
-            {/* Payment Method */}
-            <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-1.5 rounded-xl flex gap-1">
-                <button onClick={() => setActiveMethod('paystack')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'paystack' ? 'bg-white dark:bg-gray-700 shadow text-green-600 dark:text-white' : 'text-gray-400'}`}>
-                    <div className="flex items-center justify-center gap-2"><CreditCard className="w-4 h-4" /> Paystack</div>
-                </button>
-                <button onClick={() => setActiveMethod('crypto')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'crypto' ? 'bg-indigo-500 text-white shadow' : 'text-gray-400'}`}>
-                    <div className="flex items-center justify-center gap-2"><Wallet className="w-4 h-4" /> Crypto</div>
-                </button>
-            </div>
-
-            <div className="flex justify-between items-center mt-6 pt-4 border-t dark:border-gray-700"><div className="text-sm text-gray-500">Total:</div><div className="text-2xl font-black text-green-600">₦{grandTotal.toLocaleString()}</div></div>
-            
-            {/* Order Summary in Modal */}
+            {/* 🟢 ORDER SUMMARY (ITEMS LIST) */}
             <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
                 <p className="text-[10px] text-gray-400 font-bold uppercase mb-2">Order Summary</p>
                 <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
@@ -585,8 +593,19 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
                 </div>
             </div>
 
+            <div className="flex justify-between items-center mt-6 pt-4 border-t dark:border-gray-700"><div className="text-sm text-gray-500">Total:</div><div className="text-2xl font-black text-green-600">₦{grandTotal.toLocaleString()}</div></div>
+            
+            <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-1.5 rounded-xl flex gap-1">
+                <button onClick={() => setActiveMethod('paystack')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'paystack' ? 'bg-white dark:bg-gray-700 shadow text-green-600 dark:text-white' : 'text-gray-400'}`}>
+                    <div className="flex items-center justify-center gap-2"><CreditCard className="w-4 h-4" /> Paystack</div>
+                </button>
+                <button onClick={() => setActiveMethod('crypto')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'crypto' ? 'bg-indigo-500 text-white shadow' : 'text-gray-400'}`}>
+                    <div className="flex items-center justify-center gap-2"><Wallet className="w-4 h-4" /> Crypto</div>
+                </button>
+            </div>
+
             {activeMethod === 'paystack' ? (
-                (orderType === 'delivery' && (!form.address || !form.deliveryArea)) ?
+                (orderType === 'delivery' && (!form.address || !form.deliveryAreaName)) ?
                 <button disabled className="w-full mt-4 bg-gray-300 dark:bg-gray-700 text-white font-bold py-4 rounded-xl cursor-not-allowed">Enter Delivery Details</button> :
                 <PaystackButton {...paystackConfig} text="Pay Now" onSuccess={handlePaystackSuccess} onClose={() => alert("Payment Cancelled")} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg" />
             ) : (<button onClick={() => handlePayment()} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Confirm Crypto Transfer'}</button>)}
@@ -610,6 +629,12 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
          cart.map(item => <div key={item.cartId} className="flex justify-between items-center bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><div className="flex gap-3"><span className="text-2xl">{item.imageUrl ? <img src={item.imageUrl} className="w-12 h-12 object-cover rounded-lg"/> : item.image}</span><div><p className="font-bold text-sm dark:text-white">{item.name}</p><p className="text-xs text-gray-500">₦{item.price.toLocaleString()}</p></div></div><button onClick={() => removeFromCart(item.cartId)} className="text-red-500"><Minus className="w-4 h-4" /></button></div>)}
       </div>
       <div className="p-6 border-t dark:border-gray-800 bg-gray-50 dark:bg-gray-900 space-y-4">
+        {cart.length > 0 && (
+            <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-xl flex">
+                <button onClick={() => setPaymentMethod('paystack')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${paymentMethod === 'paystack' ? 'bg-white shadow dark:bg-gray-700 dark:text-white' : 'text-gray-500'}`}><CreditCard className="w-4 h-4" /> Paystack</button>
+                <button onClick={() => setPaymentMethod('crypto')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${paymentMethod === 'crypto' ? 'bg-indigo-500 text-white shadow' : 'text-gray-500'}`}><Wallet className="w-4 h-4" /> Crypto</button>
+            </div>
+        )}
         <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="text-2xl font-black dark:text-white">₦{cartTotal.toLocaleString()}</span></div>
         <button onClick={() => setShowModal(true)} disabled={cart.length === 0} className="w-full bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">Checkout</button>
       </div>

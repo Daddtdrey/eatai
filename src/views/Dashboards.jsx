@@ -165,6 +165,7 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
   const [productFile, setProductFile] = useState(null);
   const [vendorLogoFile, setVendorLogoFile] = useState(null);
   const [soundEnabled, setSoundEnabled] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
   
   // 🟢 STATE: Toggle for Manual Vendor Entry
   const [isNewVendor, setIsNewVendor] = useState(false);
@@ -357,7 +358,19 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
         )}
 
         {activeTab === 'orders' && (
-            <div className="space-y-4">{adminOrders.length === 0 ? <p className="text-center text-gray-400 mt-10">No orders found.</p> : adminOrders.map(order => (
+            <>
+            {/* 🟢 ORDER FILTERS */}
+            <div className="flex gap-2 mb-4 overflow-x-auto pb-2 scrollbar-hide">
+                {['all', 'pending', 'confirmed', 'picked_up', 'delivered'].map(status => (
+                    <button key={status} onClick={() => setStatusFilter(status)} className={`px-4 py-2 rounded-full text-xs font-bold capitalize whitespace-nowrap transition-all ${statusFilter === status ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-lg' : 'bg-white dark:bg-gray-800 text-gray-500 border border-gray-200 dark:border-gray-700'}`}>
+                        {status.replace('_', ' ')}
+                    </button>
+                ))}
+            </div>
+
+            <div className="space-y-4">
+                {adminOrders.filter(o => statusFilter === 'all' || o.status === statusFilter).length === 0 ? <p className="text-center text-gray-400 mt-10">No {statusFilter === 'all' ? '' : statusFilter} orders found.</p> : 
+                adminOrders.filter(o => statusFilter === 'all' || o.status === statusFilter).map(order => (
                 <div key={order.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
                     <div className="flex justify-between items-start mb-3"><div><span className={`text-xs font-bold px-2 py-1 rounded-full ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-800'}`}>{order.status.replace('_', ' ')}</span><p className="text-xs text-gray-400 mt-1">{new Date(order.createdAt).toLocaleString()}</p></div><div className="text-right"><p className="font-black text-lg dark:text-white">₦{order.total.toLocaleString()}</p><p className="text-xs text-gray-500 uppercase">{order.paymentMethod}</p></div></div>
                     
@@ -365,6 +378,7 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                         {groupItems(order.items).map((item, idx) => (
                                 <div key={idx} className="flex justify-between py-1 border-b border-gray-200 dark:border-gray-700 last:border-0">
                                     <span className="font-medium">{item.quantity > 1 && <span className="font-bold text-orange-600 mr-1">{item.quantity}x</span>}{item.name}</span>
+                                    {item.note && <span className="block text-[10px] text-red-500 font-bold italic">Note: {item.note}</span>}
                                     <span className="text-gray-500 text-xs">{item.vendor}</span>
                                 </div>
                         ))}
@@ -375,8 +389,9 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                     {/* Only Show Confirm for Vendors/Admin */}
                     {order.status === 'pending' && (<button onClick={() => handleStatusUpdate(order.id, 'confirmed')} className="w-full bg-green-600 text-white py-3 rounded-lg text-sm font-bold shadow hover:bg-green-700">Confirm Payment</button>)}
                     
-                </div>
-            ))}</div>
+                </div>))}
+            </div>
+            </>
         )}
 
         {activeTab === 'products' && (

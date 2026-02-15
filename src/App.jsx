@@ -46,6 +46,13 @@ export default function EatAi() {
       } catch (e) { return []; }
   });
   
+  const [favorites, setFavorites] = useState(() => { 
+      try {
+          const saved = localStorage.getItem('eatai_favorites'); 
+          return saved ? JSON.parse(saved) : []; 
+      } catch (e) { return []; }
+  });
+
   const [darkMode, setDarkMode] = useState(() => {
       const saved = localStorage.getItem('eatai_dark_mode');
       if (saved !== null) return JSON.parse(saved);
@@ -72,6 +79,7 @@ export default function EatAi() {
 
   useEffect(() => { localStorage.setItem('eatai_view', currentView); }, [currentView]);
   useEffect(() => { localStorage.setItem('eatai_cart', JSON.stringify(cart)); }, [cart]);
+  useEffect(() => { localStorage.setItem('eatai_favorites', JSON.stringify(favorites)); }, [favorites]);
   
   // Dark Mode Effect
   useEffect(() => { 
@@ -203,11 +211,26 @@ export default function EatAi() {
 
   // --- HANDLERS ---
   const addToCart = (item) => {
-    setCart([...cart, { ...item, cartId: Date.now() }]);
-    setNotification(`Added ${item.name} to cart!`);
+    const qty = item.quantity || 1;
+    const newItems = [];
+    for (let i = 0; i < qty; i++) {
+        newItems.push({ ...item, cartId: Date.now() + i + Math.random() });
+    }
+    setCart([...cart, ...newItems]);
+    setNotification(`Added ${qty}x ${item.name} to cart!`);
     setTimeout(() => setNotification(null), 2000);
   };
   
+  const toggleFavorite = (item) => {
+      if (favorites.some(f => f.id === item.id)) {
+          setFavorites(favorites.filter(f => f.id !== item.id));
+      } else {
+          setFavorites([...favorites, item]);
+          setNotification(`Saved ${item.name}!`);
+          setTimeout(() => setNotification(null), 2000);
+      }
+  };
+
   const removeFromCart = (id) => setCart(cart.filter(i => i.cartId !== id));
   const cartTotal = cart.reduce((s, i) => s + i.price, 0).toFixed(2);
   
@@ -250,7 +273,7 @@ export default function EatAi() {
 
   return (
     <div className={darkMode ? "dark" : ""}>
-      <div className="bg-slate-50 dark:bg-gray-950 min-h-screen font-sans text-gray-900 dark:text-white relative overflow-hidden flex flex-col transition-colors duration-300">
+      <div className="bg-[#FDFBF7] dark:bg-gray-950 min-h-screen font-sans text-gray-900 dark:text-white relative overflow-hidden flex flex-col transition-colors duration-300">
         
         {notification && <Toast message={notification} />}
 
@@ -286,7 +309,7 @@ export default function EatAi() {
         />
         
         {/* HEADER */}
-        <header className="flex-none flex items-center justify-between px-6 py-4 bg-white/80 backdrop-blur-md dark:bg-gray-900/80 shadow-sm z-40 transition-colors border-b border-gray-200/50 dark:border-gray-800">
+        <header className="flex-none flex items-center justify-between px-6 py-4 bg-[#FDFBF7]/80 backdrop-blur-md dark:bg-gray-900/80 shadow-sm z-40 transition-colors border-b border-gray-200/50 dark:border-gray-800">
             <div className="text-xl font-black text-orange-500 cursor-pointer" onClick={() => setCurrentView('home')}>EatAi</div>
             <div className="flex items-center gap-3">
                 <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">{darkMode ? <Sun className="w-5 h-5"/> : <Moon className="w-5 h-5"/>}</button>
@@ -331,6 +354,8 @@ export default function EatAi() {
                     onLoadMore={handleLoadMore}
                     hasMore={hasMore}
                     isLoadingMore={isLoadingMore}
+                    favorites={favorites}
+                    toggleFavorite={toggleFavorite}
                 />
             }
             

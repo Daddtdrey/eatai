@@ -3,7 +3,7 @@ import {
     ChefHat, ShoppingBag, Package, Store, ArrowLeft, LogIn,
     ShoppingCart, CreditCard, Wallet, MapPin, Leaf, Beef, Zap, Cookie,
     X, Minus, Sparkles, Box, Bell, Heart, Flame, Baby, Dumbbell, Plus, Eye,
-    Mail, Lock, User, Search, Home, Navigation, ChevronDown, Percent, Trash2, BellRing, CheckCircle, Clock, Edit2
+    Mail, Lock, User, Search, Home, Navigation, ChevronDown, Percent, Trash2, BellRing, CheckCircle, Clock, Edit2, AlertTriangle
 } from 'lucide-react';
 import { usePaystackPayment } from 'react-paystack';
 import { ethers } from 'ethers';
@@ -13,7 +13,7 @@ import { ViewContainer, DietaryFilter, ProductCard, OrderDetailModal, Toast } fr
 import { ProductDetailModal } from '../components/ProductDetailModal.jsx';
 import {
     signInWithGoogle, createOrder, getUserOrders, saveUserProfile, getUserProfile,
-    db, collection, onSnapshot, query, where, saveWalletToProfile, requestNotificationPermission,
+    db, doc, collection, onSnapshot, query, where, saveWalletToProfile, requestNotificationPermission,
     signUpWithEmail, logInWithEmail, saveStockRequest
 } from '../firebase.js';
 import { LOCATIONS, VENDORS_BY_LOCATION, PAYSTACK_KEY, BANK_DETAILS, calculateDeliveryFee, GEMINI_API_KEY, DELIVERY_ZONES } from '../config.js';
@@ -467,10 +467,12 @@ export const OrdersView = ({ setCurrentView, user }) => {
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedOrder, setSelectedOrder] = useState(null);
+    const [retryingOrderId, setRetryingOrderId] = useState(null);
+
     useEffect(() => {
         const q = query(collection(db, "orders"), where("userId", "==", user.uid));
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
             setOrders(data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
             setLoading(false);
         });
@@ -485,10 +487,51 @@ export const OrdersView = ({ setCurrentView, user }) => {
         } catch (e) { console.error(e); }
     };
 
+    // 🟢 RETRY: Reopen Paystack for a pending order
+    const RetryPayButton = ({ order }) => {
+        const retryRef = `${order.id}_retry_${Date.now()}`;
+        const initRetryPayment = usePaystackPayment({
+            reference: retryRef,
+            email: user?.email,
+            amount: order.total * 100,
+            publicKey: PAYSTACK_KEY,
+            metadata: { orderId: order.id },
+        });
+
+        return (
+            <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setRetryingOrderId(order.id);
+                    initRetryPayment(
+                        (res) => { console.log('✅ Retry payment success:', res); setRetryingOrderId(null); },
+                        () => { console.log('Retry popup closed'); setRetryingOrderId(null); }
+                    );
+                }}
+                className="w-full mt-2 bg-orange-500 text-white py-2 rounded-xl text-xs font-bold shadow hover:bg-orange-600 active:scale-95 transition-all flex items-center justify-center gap-1"
+            >
+                {retryingOrderId === order.id ? (
+                    <><div className="animate-spin w-3 h-3 border-2 border-white border-t-transparent rounded-full"></div> Opening...</>
+                ) : (
+                    <><CreditCard className="w-3 h-3" /> Pay Now — ₦{order.total.toLocaleString()}</>
+                )}
+            </button>
+        );
+    };
+
     return (
         <ViewContainer title="My Orders" showBack onBack={() => setCurrentView('home')}>
             {selectedOrder && <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} onRate={handleRateProduct} />}
-            {loading ? <div className="flex justify-center p-10"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div> : orders.length === 0 ? <div className="text-center mt-10 text-gray-400"><Package className="w-16 h-16 mx-auto mb-4 opacity-20" /><p>No orders yet.</p></div> : <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide space-y-3">{orders.map(order => (<div key={order.id} onClick={() => setSelectedOrder(order)} className="bg-white dark:bg-gray-900 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 cursor-pointer active:scale-95 transition-transform hover:border-orange-200"><div className="flex justify-between mb-2"><span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-wider ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : order.status === 'picked_up' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>{order.status.replace('_', ' ')}</span><span className="text-xs text-gray-400 font-mono">#{order.id.slice(0, 6)}</span></div><div className="flex justify-between items-end"><div><p className="font-bold dark:text-white text-sm">{order.items.length} Items</p><p className="text-xs text-gray-500">{new Date(order.createdAt).toLocaleDateString()}</p></div><div className="text-right"><p className="font-black text-orange-500 text-lg">₦{order.total.toLocaleString()}</p><p className="text-[10px] text-gray-400 font-medium">Tap for details</p></div></div></div>))}</div>}
+            {loading ? <div className="flex justify-center p-10"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div> : orders.length === 0 ? <div className="text-center mt-10 text-gray-400"><Package className="w-16 h-16 mx-auto mb-4 opacity-20" /><p>No orders yet.</p></div> : <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide space-y-3">{orders.map(order => (<div key={order.id} className="bg-white dark:bg-gray-900 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
+                <div onClick={() => setSelectedOrder(order)} className="cursor-pointer active:scale-95 transition-transform">
+                    <div className="flex justify-between mb-2"><span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-wider ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : order.status === 'picked_up' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>{order.status.replace('_', ' ')}</span><span className="text-xs text-gray-400 font-mono">#{order.id.slice(0, 6)}</span></div>
+                    <div className="flex justify-between items-end"><div><p className="font-bold dark:text-white text-sm">{order.items.length} Items</p><p className="text-xs text-gray-500">{new Date(order.createdAt).toLocaleDateString()}</p></div><div className="text-right"><p className="font-black text-orange-500 text-lg">₦{order.total.toLocaleString()}</p><p className="text-[10px] text-gray-400 font-medium">Tap for details</p></div></div>
+                </div>
+                {/* 🟢 RETRY: Show Pay Now button for pending Paystack orders */}
+                {order.status === 'pending' && order.paymentMethod === 'paystack' && (
+                    <RetryPayButton order={order} />
+                )}
+            </div>))}</div>}
         </ViewContainer>
     );
 };
@@ -582,11 +625,12 @@ export const DeciderView = ({ ingredients, setIngredients, generateRecipes, isTh
 export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city }) => {
     if (!isOpen) return null;
     const [processing, setProcessing] = useState(false);
+    const [paymentStage, setPaymentStage] = useState(null); // null | 'waiting' | 'confirmed' | 'closed'
     const [orderType, setOrderType] = useState('delivery');
     const [form, setForm] = useState({ transferName: '', address: '', phone: '', landmark: '', deliveryAreaName: '' });
     const [activeMethod, setActiveMethod] = useState(paymentMethod || 'paystack');
 
-    // 🟢 NEW: Get Zones for Current City
+    // 🟢 Get Zones for Current City
     const availableZones = DELIVERY_ZONES[city] || [];
 
     // GPS
@@ -606,7 +650,7 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
         }
     }, [user, isOpen]);
 
-    // 🟢 NEW: Use zone name to get price
+    // 🟢 Use zone name to get price
     const deliveryFee = orderType === 'pickup' ? 0 : calculateDeliveryFee(city, form.deliveryAreaName);
     const grandTotal = total + deliveryFee;
 
@@ -621,33 +665,47 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
         publicKey: PAYSTACK_KEY,
     });
 
+    // 🟢 Listen for order confirmation via Firestore (webhook updates order)
+    useEffect(() => {
+        if (!paymentStage || paymentStage === 'confirmed') return;
+        const unsubscribe = onSnapshot(doc(db, 'orders', orderId), (snapshot) => {
+            if (snapshot.exists() && snapshot.data().status === 'confirmed') {
+                setPaymentStage('confirmed');
+                setTimeout(() => onSuccess(), 2000); // Show success briefly then close
+            }
+        });
+        return () => unsubscribe();
+    }, [paymentStage, orderId]);
+
     const handlePayment = async (method = activeMethod) => {
         if (orderType === 'delivery' && (!form.address || !form.phone || !form.deliveryAreaName)) return alert("Please select a Delivery Area and enter address.");
 
         setProcessing(true);
         try {
             if (method === 'paystack') {
-                // 1. Create Order as PENDING first, using same orderId as Paystack reference
+                // 1. Create Order as PENDING first
                 await createOrder(
                     user.uid, cart, grandTotal, method,
                     globalWallet?.address, form.address, "Paystack Online",
                     form.phone, form.landmark, deliveryFee,
                     'pending', orderType, '', orderId
                 );
-
                 await saveUserProfile(user.uid, { address: form.address, phone: form.phone, landmark: form.landmark });
 
-                // 2. Open Paystack popup — webhook handles the confirmation server-side
-                //    Close checkout immediately so user isn't stuck on "Processing"
+                // 2. Show waiting state & open Paystack popup
                 setProcessing(false);
+                setPaymentStage('waiting');
 
                 initializePayment(
-                    (response) => { console.log("✅ Paystack payment complete:", response); },
-                    () => { console.log("Paystack popup closed by user"); }
+                    (response) => {
+                        console.log('✅ Paystack payment complete:', response);
+                        // Webhook will confirm — onSnapshot listener handles the rest
+                    },
+                    () => {
+                        console.log('Paystack popup closed by user');
+                        setPaymentStage('closed');
+                    }
                 );
-
-                // 3. Dismiss the checkout modal & clear cart right away
-                onSuccess();
             } else {
                 // Crypto / Other Flow
                 await new Promise(r => setTimeout(r, 1500));
@@ -665,7 +723,45 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
     return (
         <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
             <div className="bg-white dark:bg-gray-900 w-full max-w-lg p-6 rounded-t-3xl md:rounded-3xl shadow-2xl relative max-h-[90vh] overflow-y-auto">
-                <button onClick={onClose} className="absolute top-4 right-4"><X className="w-5 h-5" /></button>
+                <button onClick={onClose} className="absolute top-4 right-4 z-10"><X className="w-5 h-5" /></button>
+
+                {/* ===== PAYMENT STATUS OVERLAY ===== */}
+                {paymentStage && (
+                    <div className="absolute inset-0 z-20 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center p-8 text-center">
+                        {paymentStage === 'waiting' && (
+                            <>
+                                <div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                                <h3 className="text-xl font-black dark:text-white mb-2">Completing Payment...</h3>
+                                <p className="text-sm text-gray-500 mb-1">Complete the payment in the Paystack window.</p>
+                                <p className="text-xs text-gray-400 mb-6">This screen updates automatically once confirmed.</p>
+                                <button onClick={() => setPaymentStage('closed')} className="text-xs text-gray-400 underline hover:text-orange-500 transition-colors">I'll pay later</button>
+                            </>
+                        )}
+                        {paymentStage === 'confirmed' && (
+                            <>
+                                <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-4">
+                                    <CheckCircle className="w-10 h-10 text-green-600" />
+                                </div>
+                                <h3 className="text-xl font-black text-green-700 mb-2">Payment Confirmed! ✅</h3>
+                                <p className="text-sm text-gray-500">Your order is on its way. Redirecting...</p>
+                            </>
+                        )}
+                        {paymentStage === 'closed' && (
+                            <>
+                                <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
+                                    <AlertTriangle className="w-10 h-10 text-yellow-600" />
+                                </div>
+                                <h3 className="text-lg font-black dark:text-white mb-2">Payment Not Completed</h3>
+                                <p className="text-sm text-gray-500 mb-4">You closed the payment window. Your order is saved as pending — you can pay anytime from <b>My Orders</b>.</p>
+                                <div className="space-y-2 w-full max-w-xs">
+                                    <button onClick={() => { setPaymentStage('waiting'); initializePayment((r) => console.log('✅ Retry:', r), () => setPaymentStage('closed')); }} className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold shadow hover:bg-orange-600 transition-colors">Try Again</button>
+                                    <button onClick={onClose} className="w-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors">Go to My Orders</button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                )}
+
                 <h3 className="text-xl font-bold text-center mb-4 dark:text-white">Complete Order</h3>
 
                 {/* TOGGLE: Delivery / Pickup */}

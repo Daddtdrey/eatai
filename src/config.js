@@ -21,16 +21,18 @@ export const DELIVERY_ZONES = {
     "Irrua": [
         { name: "Irrua - Central / ISTH", price: 1000 },
         { name: "Irrua - Palace Road", price: 1500 },
-        { name: "Irrua - Ako Junction", price: 1500 },
+        { name: "Irrua - Ako Junction", price: 1800 },
         { name: "Irrua - Other", price: 1500 },
-        { name: "Ekpoma (Inter-city)", price: 2000 } // Delivery from Irrua to Ekpoma
+        { name: "Ekpoma (Inter-city)", price: 2200 } // Delivery from Irrua to Ekpoma
     ],
     "Ekpoma": [
         { name: "Ekpoma - Market Square", price: 1000 },
+        { name: "Ekpoma - emaudo", price: 1200 },
         { name: "Ekpoma - Mandela", price: 1500 },
         { name: "Ekpoma - Poultry Road", price: 2000 },
-        { name: "Ekpoma - Ambrose Alli Uni", price: 1500 },
-        { name: "Ekpoma - Other", price: 1500 },
+        { name: "Ekpoma - Ambrose Alli Uni", price: 1800 },
+        { name: "Ekpoma - iruekpen", price: 2000 },
+        { name: "Ekpoma - abia", price: 2200 },
         { name: "Irrua (Inter-city)", price: 2000 } // Delivery from Ekpoma to Irrua
     ],
     "Uromi": [

@@ -221,7 +221,7 @@ export const getGlobalVendors = async () => {
 
         // Store metadata
         vendorMetadata[doc.id] = {
-          openTime: data.openTime || "09:00",
+          openTime: data.openTime || "07:00",
           closeTime: data.closeTime || "18:20",
           logo: data.logo
         };
@@ -289,6 +289,9 @@ export const deleteProduct = async (id) => { await deleteDoc(doc(db, "products",
 
 export const createOrder = async (userId, cart, total, paymentMethod, walletAddress, address, transferName, phone, landmark, deliveryFee, status = 'pending', orderType = 'delivery', deliveryNote = '', customOrderId = null) => {
   try {
+    // Sanitize: Firestore doesn't allow undefined values
+    const sanitize = (obj) => JSON.parse(JSON.stringify(obj, (k, v) => v === undefined ? null : v));
+
     let finalOrderId = null;
     await runTransaction(db, async (transaction) => {
       // 1. Group items
@@ -319,13 +322,13 @@ export const createOrder = async (userId, cart, total, paymentMethod, walletAddr
       const newOrderRef = customOrderId ? doc(db, "orders", customOrderId) : doc(collection(db, "orders"));
       finalOrderId = newOrderRef.id;
 
-      transaction.set(newOrderRef, {
+      transaction.set(newOrderRef, sanitize({
         userId, items: cart, total: parseFloat(total), paymentMethod,
         walletAddress: walletAddress || null, deliveryAddress: orderType === 'pickup' ? 'PICKUP' : address,
         phone, landmark: orderType === 'pickup' ? 'PICKUP' : landmark, deliveryFee,
         transferName: transferName || null, status: status, orderType, createdAt: new Date().toISOString(),
         deliveryNote: deliveryNote || null
-      });
+      }));
     });
     return finalOrderId;
   } catch (e) {
@@ -352,6 +355,10 @@ export const getAllOrders = async () => {
 
 export const updateOrderStatus = async (orderId, status) => {
   await updateDoc(doc(db, "orders", orderId), { status });
+};
+
+export const deleteOrder = async (orderId) => {
+  await deleteDoc(doc(db, "orders", orderId));
 };
 
 export const addReview = async (productId, userId, userName, rating, comment, orderId) => {
@@ -387,6 +394,48 @@ export const addReview = async (productId, userId, userName, rating, comment, or
 
 export const requestNotificationPermission = async (userId, role, vendorName) => {
   try {
+    // 🟢 NATIVE APP (Capacitor/Android) — Use native push
+    if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+      const { PushNotifications } = await import('@capacitor/push-notifications');
+
+      // Request permission
+      const permResult = await PushNotifications.requestPermissions();
+      if (permResult.receive !== 'granted') {
+        return alert("Notifications denied. Please enable them in your phone settings.");
+      }
+
+      // Register for push
+      await PushNotifications.register();
+
+      // Listen for the token
+      return new Promise((resolve) => {
+        PushNotifications.addListener('registration', async (tokenData) => {
+          const token = tokenData.value;
+          console.log("✅ Native FCM Token:", token);
+
+          if (userId && token) {
+            await setDoc(doc(db, "users", userId), { fcmToken: token }, { merge: true });
+
+            if (role === 'logistics' || role === 'super') {
+              await setDoc(doc(db, "notifications", "logistics_group"), { [userId]: token }, { merge: true });
+            }
+            if ((role === 'sub' || role === 'vendor') && vendorName) {
+              await setDoc(doc(db, "notifications", vendorName), { token: token, email: userId }, { merge: true });
+            }
+            alert("Success! Device registered for native alerts.");
+          }
+          resolve(token);
+        });
+
+        PushNotifications.addListener('registrationError', (error) => {
+          console.error("Native push registration error:", error);
+          alert("Error registering for notifications: " + JSON.stringify(error));
+          resolve(null);
+        });
+      });
+    }
+
+    // 🟢 WEB BROWSER — Use Firebase Cloud Messaging
     if (!('Notification' in window)) return alert("Notifications not supported on this device.");
 
     const permission = await Notification.requestPermission();
@@ -395,15 +444,11 @@ export const requestNotificationPermission = async (userId, role, vendorName) =>
       const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
 
       if (userId && token) {
-        // Save to User Profile
         await setDoc(doc(db, "users", userId), { fcmToken: token }, { merge: true });
 
-        // Save to Logistics Group
         if (role === 'logistics' || role === 'super') {
           await setDoc(doc(db, "notifications", "logistics_group"), { [userId]: token }, { merge: true });
         }
-
-        // Save to Vendor Group
         if ((role === 'sub' || role === 'vendor') && vendorName) {
           await setDoc(doc(db, "notifications", vendorName), { token: token, email: userId }, { merge: true });
         }
@@ -448,5 +493,5 @@ export const saveStockRequest = async (item, userId, userEmail) => {
 // 7. EXPORTS
 // ==========================================
 
-export { collection, query, where, onSnapshot, orderBy, limit, startAfter };
+export { collection, doc, query, where, onSnapshot, orderBy, limit, startAfter };
 export const seedDatabase = async () => { console.log("Seeding available."); };

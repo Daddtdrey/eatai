@@ -30,7 +30,8 @@ exports.paystackWebhook = onRequest(async (req, res) => {
     // Process event
     const event = req.body;
     if (event.event === 'charge.success') {
-        const orderId = event.data.reference;
+        // Support both initial payments (reference=orderId) and retries (metadata.orderId)
+        const orderId = event.data.metadata?.orderId || event.data.reference;
         const amount = event.data.amount / 100; // Paystack sends in kobo/cents
 
         console.log(`💰 Payment verified for Order: ${orderId} | Amount: ${amount}`);
@@ -107,8 +108,8 @@ const alertDrivers = async (orderData) => {
 
 /**
  * 🟢 TRIGGER 1: NEW ORDER CREATED
- * 1. Notify Vendor (Always)
- * 2. Notify Logistics (IF Paid via Paystack/Confirmed)
+ * Only log the order. Don't notify anyone yet — orders start as 'pending'.
+ * Notifications happen in handleOrderUpdate when status changes to 'confirmed'.
  */
 exports.handleNewOrder = onDocumentCreated("orders/{orderId}", async (event) => {
     const snapshot = event.data;
@@ -117,7 +118,19 @@ exports.handleNewOrder = onDocumentCreated("orders/{orderId}", async (event) => 
     const order = snapshot.data();
     const orderIdShort = event.params.orderId.slice(0, 5).toUpperCase();
 
-    // --- A. NOTIFY VENDOR ---
+    console.log(`📝 New order #${orderIdShort} created (status: ${order.status})`);
+
+    // If order is already confirmed on creation (rare edge case), notify immediately
+    if (order.status === "confirmed") {
+        await notifyVendors(order, orderIdShort);
+        await alertDrivers(order);
+    }
+});
+
+/**
+ * 🟢 HELPER: Notify Vendors
+ */
+const notifyVendors = async (order, orderIdShort) => {
     const vendors = [...new Set((order.items || []).map(item => item.vendor))];
 
     for (const vendorName of vendors) {
@@ -129,9 +142,9 @@ exports.handleNewOrder = onDocumentCreated("orders/{orderId}", async (event) => 
                     token: doc.data().token,
                     notification: {
                         title: "👨‍🍳 New Order!",
-                        body: `#${orderIdShort}: ₦${order.total.toLocaleString()} (Paid: ${order.paymentMethod})`
+                        body: `#${orderIdShort}: ₦${order.total.toLocaleString()} (${order.paymentMethod})`
                     },
-                    android: { priority: "high", notification: { sound: "default" } },
+                    android: { priority: "high", notification: { sound: "default", priority: "max", channelId: "order_alerts" } },
                     apns: { payload: { aps: { sound: "default", "content-available": 1 } } },
                     data: { url: "/admin" }
                 });
@@ -141,26 +154,24 @@ exports.handleNewOrder = onDocumentCreated("orders/{orderId}", async (event) => 
             console.error(`❌ Vendor alert failed (${vendorName}):`, error);
         }
     }
-
-    // --- B. NOTIFY LOGISTICS (If Paystack/Confirmed) ---
-    if (order.status === "confirmed") {
-        console.log("💰 Order is auto-confirmed (Paystack). Alerting Logistics immediately.");
-        await alertDrivers(order);
-    }
-});
+};
 
 /**
  * 🟢 TRIGGER 2: ORDER UPDATED
- * Notify Logistics ONLY if status CHANGES to 'confirmed' (Manual/Crypto payments)
+ * When status changes to 'confirmed':
+ * 1. Notify Vendor (order is now paid!)
+ * 2. Notify Logistics (for delivery)
  */
 exports.handleOrderUpdate = onDocumentUpdated("orders/{orderId}", async (event) => {
     const newData = event.data.after.data();
     const prevData = event.data.before.data();
 
     // Only run if status CHANGED to 'confirmed'
-    // (We check this to avoid double-alerting on Paystack orders which start as confirmed)
     if (newData.status === "confirmed" && prevData.status !== "confirmed") {
-        console.log("📝 Order manually confirmed. Alerting Logistics...");
+        const orderIdShort = event.params.orderId.slice(0, 5).toUpperCase();
+        console.log(`✅ Order #${orderIdShort} confirmed! Alerting vendor + logistics...`);
+
+        await notifyVendors(newData, orderIdShort);
         await alertDrivers(newData);
     }
 });

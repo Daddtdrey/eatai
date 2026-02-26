@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">EatAi</string>
+    <string name="title_activity_main">EatAi</string>
+    <string name="package_name">com.eatai.app</string>
+    <string name="custom_url_scheme">com.eatai.app</string>
+</resources>

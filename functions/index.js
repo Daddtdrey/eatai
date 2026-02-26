@@ -1,9 +1,67 @@
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { setGlobalOptions } = require("firebase-functions/v2");
+const crypto = require("crypto");
 
 admin.initializeApp();
 setGlobalOptions({ maxInstances: 10 });
+
+/**
+ * 🟢 TRIGGER 0: PAYSTACK WEBHOOK
+ * Listens for Paystack payment success events
+ */
+exports.paystackWebhook = onRequest(async (req, res) => {
+    // Validate event
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+
+    // Fallback if not set in process.env (for local testing/setup)
+    if (!secret) {
+        console.error("PAYSTACK_SECRET_KEY is not set.");
+        return res.status(500).send("Server configuration error");
+    }
+
+    const hash = crypto.createHmac('sha512', secret).update(JSON.stringify(req.body)).digest('hex');
+    if (hash !== req.headers['x-paystack-signature']) {
+        console.log("Invalid Paystack Signature");
+        return res.status(401).send("Unauthorized");
+    }
+
+    // Process event
+    const event = req.body;
+    if (event.event === 'charge.success') {
+        const orderId = event.data.reference;
+        const amount = event.data.amount / 100; // Paystack sends in kobo/cents
+
+        console.log(`💰 Payment verified for Order: ${orderId} | Amount: ${amount}`);
+
+        try {
+            // Find the pending order and mark it confirmed
+            const orderRef = admin.firestore().collection("orders").doc(orderId);
+            const orderDoc = await orderRef.get();
+
+            if (!orderDoc.exists) {
+                console.error(`Order ${orderId} not found in DB!`);
+                return res.status(404).send("Order not found");
+            }
+
+            // Optional: You could check if orderDoc.data().total == amount here
+
+            await orderRef.update({
+                status: "confirmed",
+                paidAt: new Date().toISOString()
+            });
+            console.log(`✅ Order ${orderId} confirmed via Webhook.`);
+
+        } catch (error) {
+            console.error(`❌ Error updating order ${orderId}:`, error);
+            return res.status(500).send("Database error");
+        }
+    }
+
+    // Acknowledge receipt
+    res.status(200).send();
+});
 
 /**
  * 🟢 HELPER: Send Logistics Alert
@@ -18,7 +76,7 @@ const alertDrivers = async (orderData) => {
         if (tokens.length === 0) return console.log("No drivers registered");
 
         console.log(`📣 Alerting ${tokens.length} drivers for Order...`);
-        
+
         // Vendor List
         const vendorList = [...new Set((orderData.items || []).map(i => i.vendor))].join(", ");
 
@@ -55,13 +113,13 @@ const alertDrivers = async (orderData) => {
 exports.handleNewOrder = onDocumentCreated("orders/{orderId}", async (event) => {
     const snapshot = event.data;
     if (!snapshot) return;
-    
+
     const order = snapshot.data();
     const orderIdShort = event.params.orderId.slice(0, 5).toUpperCase();
-    
+
     // --- A. NOTIFY VENDOR ---
     const vendors = [...new Set((order.items || []).map(item => item.vendor))];
-    
+
     for (const vendorName of vendors) {
         if (!vendorName) continue;
         try {

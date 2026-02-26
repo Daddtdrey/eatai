@@ -1,15 +1,16 @@
-import React from 'react';
-import { TrendingUp, ShoppingBag, CreditCard, Award, Calendar, DollarSign, PieChart } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { TrendingUp, ShoppingBag, CreditCard, Award, Calendar, DollarSign, PieChart, X, FileText } from 'lucide-react';
 
 export const AnalyticsDashboard = ({ orders, role, myVendorName }) => {
+  const [selectedOrder, setSelectedOrder] = useState(null);
   
-  const calculateStats = () => {
+  const stats = useMemo(() => {
     // Global / Lifetime Stats
     let totalRevenue = 0;
     let totalOrders = 0;
     let itemsSold = 0;
     
-    // Daily Stats (Today)
+    
     let dailyRevenue = 0;
     let dailyOrders = 0;
     
@@ -32,7 +33,7 @@ export const AnalyticsDashboard = ({ orders, role, myVendorName }) => {
       order.items.forEach(item => {
         // Filter logic: Super Admin sees ALL. Vendor sees ONLY theirs.
         if (role === 'super' || item.vendor === myVendorName) {
-          const price = item.price;
+          const price = item.price + (item.sidePrice || 0);
           
           // Add to Order Total
           orderRevenue += price;
@@ -73,9 +74,7 @@ export const AnalyticsDashboard = ({ orders, role, myVendorName }) => {
         dailyRevenue, dailyOrders,
         vendorLifetime, vendorDaily, topVendor 
     };
-  };
-
-  const stats = calculateStats();
+  }, [orders, role, myVendorName]);
 
   return (
     <div className="space-y-6 animate-fade-in p-4">
@@ -158,6 +157,82 @@ export const AnalyticsDashboard = ({ orders, role, myVendorName }) => {
                         <span className="text-sm font-bold text-gray-900 dark:text-white">₦{amount.toLocaleString()}</span>
                     </div>
                 ))}
+            </div>
+        </div>
+      )}
+
+      {/* 5. SUPER ADMIN: RECENT ORDERS LOG (Clickable) */}
+      {role === 'super' && (
+        <div className="mt-8">
+            <div className="flex items-center gap-2 mb-3 px-1">
+                <FileText className="w-4 h-4 text-gray-400" />
+                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Recent Orders Log</h4>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+                <div className="max-h-96 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+                    {orders.slice().reverse().map((order) => (
+                        <div 
+                            key={order.id} 
+                            onClick={() => setSelectedOrder(order)}
+                            className="p-4 hover:bg-blue-50 dark:hover:bg-blue-900/10 cursor-pointer transition-colors flex justify-between items-center group"
+                        >
+                            <div className="flex flex-col">
+                                <span className="font-mono text-xs text-gray-400">#{order.id.slice(-6)}</span>
+                                <span className="text-sm font-bold text-gray-700 dark:text-gray-200">
+                                    {order.items.length} items • {new Date(order.createdAt).toLocaleTimeString()}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className={`text-xs font-bold px-2 py-1 rounded-full capitalize ${
+                                    order.status === 'confirmed' || order.status === 'delivered' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
+                                }`}>
+                                    {order.status}
+                                </span>
+                                <span className="text-gray-400 group-hover:text-blue-500">→</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* ORDER DETAILS MODAL */}
+      {selectedOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => setSelectedOrder(null)}>
+            <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-700/50">
+                    <div>
+                        <h3 className="font-bold text-lg">Order Details</h3>
+                        <p className="text-xs text-gray-500 font-mono">#{selectedOrder.id}</p>
+                    </div>
+                    <button onClick={() => setSelectedOrder(null)} className="p-2 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full transition-colors">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+                <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+                    <div className="space-y-3">
+                        {selectedOrder.items.map((item, idx) => (
+                            <div key={idx} className="flex justify-between items-start text-sm border-b border-gray-50 dark:border-gray-700/50 pb-2 last:border-0">
+                                <div>
+                                    <span className="font-bold text-gray-800 dark:text-gray-200">{item.quantity || 1}x {item.name}</span>
+                                    {item.selectedSide && <span className="block text-xs text-orange-600 font-medium">+ {item.selectedSide} (₦{item.sidePrice})</span>}
+                                    <p className="text-xs text-gray-500">{item.vendor}</p>
+                                </div>
+                                <span className="font-medium">₦{(item.price + (item.sidePrice || 0)).toLocaleString()}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="pt-4 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center">
+                        <span className="font-bold text-gray-500">Total Amount</span>
+                        <span className="font-black text-2xl text-green-600">
+                            ₦{selectedOrder.items.reduce((acc, item) => acc + item.price + (item.sidePrice || 0), 0).toLocaleString()}
+                        </span>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-700/30 p-3 rounded-xl text-xs text-gray-500 text-center">
+                        Order placed on {new Date(selectedOrder.createdAt).toLocaleString()}
+                    </div>
+                </div>
             </div>
         </div>
       )}

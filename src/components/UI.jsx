@@ -181,14 +181,16 @@ export const OrderDetailModal = ({ order, onClose, onRate }) => {
 
         <div className="space-y-3 mb-6 max-h-[40vh] overflow-y-auto scrollbar-hide">
             {order.items.map((item, i) => (
-                <div key={i} className="flex justify-between items-center border-b border-gray-100 dark:border-gray-800 pb-2 last:border-0">
+                <div key={i} className="flex justify-between items-start border-b border-gray-100 dark:border-gray-800 pb-2 last:border-0">
                     <div>
                         <p className="font-bold text-sm dark:text-white">{item.name}</p>
+                        {item.selectedSide && (
+                            <p className="text-xs text-orange-600 font-medium">+ {item.selectedSide} (₦{item.sidePrice})</p>
+                        )}
                         <p className="text-xs text-gray-500">{item.vendor}</p>
                     </div>
                     <div className="text-right">
-                        <p className="font-bold text-sm">₦{item.price.toLocaleString()}</p>
-                        <p className="text-xs text-gray-400">x{item.quantity}</p>
+                        <p className="font-bold text-sm">₦{(item.price + (item.sidePrice || 0)).toLocaleString()}</p>
                     </div>
                 </div>
             ))}

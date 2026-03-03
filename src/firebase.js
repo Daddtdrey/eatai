@@ -13,7 +13,7 @@ import {
   query, where, getDocs, writeBatch, increment, onSnapshot, orderBy, runTransaction,
   limit, startAfter
 } from "firebase/firestore";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getStorage, ref, uploadBytes, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { VAPID_KEY } from "./config.js";
 
@@ -31,9 +31,7 @@ const firebaseConfig = {
   appId: "1:439773552354:web:6d7e35fc4541a1708148bb"
 };
 
-// ☁️ CLOUDINARY CONFIG
-const CLOUDINARY_CLOUD_NAME = "dmsq7n9k6";
-const CLOUDINARY_PRESET = "eatai_preset";
+// ☁️ FIREBASE STORAGE MIGRATION (Cloudinary removed)
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
@@ -142,14 +140,21 @@ export const saveWalletToProfile = async (uid, address) => {
 
 export const uploadImage = async (file) => {
   if (!file) return null;
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("upload_preset", CLOUDINARY_PRESET);
   try {
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, { method: "POST", body: formData });
-    const data = await res.json();
-    return data.secure_url;
-  } catch (e) { return null; }
+    const fileExtension = file.name.split('.').pop();
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${fileExtension}`;
+    const storageRef = ref(storage, `images/${fileName}`);
+
+    // Upload the file
+    const snapshot = await uploadBytesResumable(storageRef, file);
+
+    // Get the download URL
+    const downloadURL = await getDownloadURL(snapshot.ref);
+    return downloadURL;
+  } catch (e) {
+    console.error("Firebase Storage Upload Error:", e);
+    return null;
+  }
 };
 
 export const saveVendorLogo = async (vendorName, file) => {
@@ -490,7 +495,87 @@ export const saveStockRequest = async (item, userId, userEmail) => {
 };
 
 // ==========================================
-// 7. EXPORTS
+// 8. BANNERS & PROMOS
+// ==========================================
+
+export const getBanners = async () => {
+  try {
+    const q = query(collection(db, "banners"), orderBy("createdAt", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  } catch (e) {
+    console.error("Error getting banners:", e);
+    return [];
+  }
+};
+
+export const saveBanner = async (file, title, linkToVendor, active = true, existingId = null) => {
+  try {
+    let imageUrl = null;
+    if (file) imageUrl = await uploadImage(file);
+
+    const bannerData = {
+      title,
+      linkToVendor: linkToVendor || null,
+      active,
+      updatedAt: new Date().toISOString()
+    };
+    if (imageUrl) bannerData.imageUrl = imageUrl;
+
+    if (existingId) {
+      await updateDoc(doc(db, "banners", existingId), bannerData);
+    } else {
+      bannerData.createdAt = new Date().toISOString();
+      await addDoc(collection(db, "banners"), bannerData);
+    }
+    return true;
+  } catch (e) {
+    console.error("Error saving banner:", e);
+    return false;
+  }
+};
+
+export const deleteBanner = async (id) => {
+  try {
+    await deleteDoc(doc(db, "banners", id));
+    return true;
+  } catch (e) {
+    console.error("Error deleting banner:", e);
+    return false;
+  }
+};
+
+// ==========================================
+// 9. SITE STATS (VISITORS)
+// ==========================================
+
+export const logVisit = async () => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const statRef = doc(db, "site_stats", today);
+    const docSnap = await getDoc(statRef);
+    if (!docSnap.exists()) {
+      await setDoc(statRef, { visitors: 1, date: today });
+    } else {
+      await updateDoc(statRef, { visitors: increment(1) });
+    }
+  } catch (e) {
+    console.error("Error logging visit:", e);
+  }
+};
+
+export const getTodayVisitors = async () => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const snap = await getDoc(doc(db, "site_stats", today));
+    return snap.exists() ? snap.data().visitors : 0;
+  } catch (e) {
+    return 0;
+  }
+};
+
+// ==========================================
+// 10. EXPORTS
 // ==========================================
 
 export { collection, doc, query, where, onSnapshot, orderBy, limit, startAfter };

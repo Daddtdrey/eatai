@@ -11,7 +11,8 @@ import { AnalyticsDashboard } from '../components/Analytic.jsx';
 import {
     db, collection, query, where, orderBy, limit, onSnapshot,
     updateOrderStatus, deleteOrder, addProduct, updateProduct, deleteProduct,
-    uploadImage, saveVendorLogo, getAdminRole, requestNotificationPermission
+    uploadImage, saveVendorLogo, getAdminRole, requestNotificationPermission,
+    getBanners, saveBanner, deleteBanner, getTodayVisitors
 } from '../firebase.js';
 import { SUPER_ADMINS, SUB_ADMINS, LOCATIONS, VENDORS_BY_LOCATION } from '../config.js';
 
@@ -180,6 +181,19 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
     const [myVendorName, setMyVendorName] = useState(null);
     const previousOrderCountRef = useRef(0);
     const audioRef = useRef(new Audio(NOTIFICATION_SOUND));
+
+    // 🟢 Promos & Stats State
+    const [banners, setBanners] = useState([]);
+    const [todaysVisitors, setTodaysVisitors] = useState(0);
+    const [bannerTitle, setBannerTitle] = useState('');
+    const [bannerFile, setBannerFile] = useState(null);
+    const [bannerLink, setBannerLink] = useState('');
+    const [isUploadingBanner, setIsUploadingBanner] = useState(false);
+
+    useEffect(() => {
+        getBanners().then(setBanners);
+        getTodayVisitors().then(setTodaysVisitors);
+    }, []);
 
     // 🟢 FLATTEN VENDORS: Convert { "Irrua": ["Nasco"] } -> ["Nasco"]
     const allVendorsList = useMemo(() => {
@@ -353,6 +367,12 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
 
             <div className="mb-4 p-3 bg-orange-50 dark:bg-gray-700 rounded-lg flex justify-between items-center">
                 <div><p className="text-xs font-bold text-gray-500 uppercase">Logged in as</p><p className="font-bold text-orange-600">{isSuperAdmin ? "SUPER ADMIN" : `${myVendorName || 'LOADING'} ADMIN`}</p></div>
+                {isSuperAdmin && (
+                    <div className="text-right">
+                        <p className="text-xs font-bold text-gray-500 uppercase">Today's Visitors</p>
+                        <p className="font-black text-xl text-blue-600">{todaysVisitors}</p>
+                    </div>
+                )}
                 {!isSuperAdmin && myVendorName && (
                     <div className="flex gap-2 items-center"><label className="cursor-pointer bg-white p-2 rounded border border-gray-300"><input type="file" hidden onChange={e => setVendorLogoFile(e.target.files[0])} /><Upload className="w-4 h-4 text-gray-600" /></label>{vendorLogoFile && <button onClick={handleVendorLogoUpload} disabled={isSubmitting} className="text-xs bg-blue-500 text-white px-2 py-1 rounded">Save</button>}</div>
                 )}
@@ -362,12 +382,51 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                 <button onClick={() => setActiveTab('orders')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'orders' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><PackageIcon className="w-4 h-4" /> Orders</button>
                 <button onClick={() => setActiveTab('products')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'products' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><Box className="w-4 h-4" /> Inventory</button>
                 <button onClick={() => setActiveTab('analytics')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'analytics' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><BarChart3 className="w-4 h-4" /> Stats</button>
+                {isSuperAdmin && <button onClick={() => setActiveTab('banners')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'banners' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><ImageIcon className="w-4 h-4" /> Banners</button>}
             </div>
 
             <div className="flex-1 overflow-y-auto pb-32 scrollbar-hide min-h-0">
 
                 {activeTab === 'analytics' && (
                     <AnalyticsDashboard orders={adminOrders} role={role} myVendorName={myVendorName} />
+                )}
+
+                {activeTab === 'banners' && isSuperAdmin && (
+                    <div className="space-y-4">
+                        <h2 className="text-xl font-bold dark:text-white mb-2">Manage Promo Banners</h2>
+                        <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 space-y-3">
+                            <input type="text" placeholder="Banner Title" value={bannerTitle} onChange={e => setBannerTitle(e.target.value)} className="w-full p-3 bg-gray-50 dark:bg-gray-900 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
+                            <input type="text" placeholder="Link to Vendor (Optional, precise name)" value={bannerLink} onChange={e => setBannerLink(e.target.value)} className="w-full p-3 bg-gray-50 dark:bg-gray-900 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
+                            <input type="file" onChange={e => setBannerFile(e.target.files[0])} className="w-full p-3 bg-gray-50 dark:bg-gray-900 rounded-xl text-sm" accept="image/*" />
+                            <button
+                                onClick={async () => {
+                                    if (!bannerFile || !bannerTitle) return alert('File and title required');
+                                    setIsUploadingBanner(true);
+                                    await saveBanner(bannerFile, bannerTitle, bannerLink);
+                                    setBannerFile(null); setBannerTitle(''); setBannerLink('');
+                                    getBanners().then(setBanners);
+                                    setIsUploadingBanner(false);
+                                }}
+                                disabled={isUploadingBanner}
+                                className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2 shadow hover:bg-blue-700 transition"
+                            >
+                                {isUploadingBanner ? 'Uploading...' : 'Add Banner'}
+                            </button>
+                        </div>
+
+                        <div className="space-y-3 mt-6">
+                            {banners.length === 0 ? <p className="text-center text-gray-400 mt-6">No active banners.</p> : banners.map(b => (
+                                <div key={b.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm flex items-center gap-4 border border-gray-100 dark:border-gray-700">
+                                    <img src={b.imageUrl} className="w-24 h-16 object-cover rounded-lg" />
+                                    <div className="flex-1">
+                                        <h4 className="font-bold dark:text-gray-200">{b.title}</h4>
+                                        {b.linkToVendor && <p className="text-xs text-blue-500 mt-1">🏷️ Loops to: {b.linkToVendor}</p>}
+                                    </div>
+                                    <button onClick={async () => { if (confirm('Delete banner?')) { await deleteBanner(b.id); getBanners().then(setBanners); } }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><X className="w-5 h-5" /></button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 )}
 
                 {activeTab === 'orders' && (

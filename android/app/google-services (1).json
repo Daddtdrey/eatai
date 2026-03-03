@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "439773552354-i9v8bvmi0vqm25qg37fv2r7uf6i6bio3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.eatai.app",
+            "certificate_hash": "22b00b3678b2f39fcaa1311744b01954b70947e2"
+          }
+        },
+        {
           "client_id": "439773552354-0j58196ppdh2lqd5480kdac11fuo4uom.apps.googleusercontent.com",
           "client_type": 3
         }

@@ -14,7 +14,7 @@ import { ProductDetailModal } from '../components/ProductDetailModal.jsx';
 import {
     signInWithGoogle, createOrder, getUserOrders, saveUserProfile, getUserProfile,
     db, doc, collection, onSnapshot, query, where, saveWalletToProfile, requestNotificationPermission,
-    signUpWithEmail, logInWithEmail, saveStockRequest
+    signUpWithEmail, logInWithEmail, saveStockRequest, getBanners
 } from '../firebase.js';
 import { LOCATIONS, VENDORS_BY_LOCATION, PAYSTACK_KEY, BANK_DETAILS, calculateDeliveryFee, GEMINI_API_KEY, DELIVERY_ZONES } from '../config.js';
 
@@ -109,11 +109,13 @@ export const LoginView = () => {
 export const HomeView = ({ setCurrentView, user }) => {
     const [hasPermission, setHasPermission] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [banners, setBanners] = useState([]);
 
     useEffect(() => {
         if ('Notification' in window && Notification.permission === 'granted') {
             setHasPermission(true);
         }
+        getBanners().then(b => setBanners(b.filter(banner => banner.active !== false)));
     }, []);
 
     const handleNotificationClick = async () => {
@@ -167,6 +169,21 @@ export const HomeView = ({ setCurrentView, user }) => {
             </div>
 
             <div className="p-6 space-y-6">
+
+                {/* PROMO BANNERS */}
+                {banners.length > 0 && (
+                    <div className="-mx-6 px-6 pb-2 pt-2 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide gap-4">
+                        {banners.map(b => (
+                            <div key={b.id} onClick={() => b.linkToVendor ? setCurrentView('market') : null} className="snap-center shrink-0 w-[85%] sm:w-[60%] md:w-[45%] h-36 md:h-48 relative rounded-[1.5rem] overflow-hidden shadow-lg border-2 border-transparent hover:border-orange-500 transition-colors cursor-pointer group">
+                                <img src={b.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-5">
+                                    <h3 className="text-white font-black text-lg md:text-xl leading-tight font-[Fredoka] drop-shadow-md">{b.title}</h3>
+                                    {b.linkToVendor && <span className="text-orange-400 text-xs font-bold mt-1 flex items-center gap-1">Shop {b.linkToVendor} <ArrowLeft className="w-3 h-3 rotate-180" /></span>}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
 
                 {/* HERO BANNER */}
                 <div className="relative w-full h-60 bg-gradient-to-r from-orange-500 to-red-600 rounded-[2.5rem] overflow-hidden shadow-xl shadow-orange-500/30 flex items-center group cursor-pointer transition-transform active:scale-[0.99]" onClick={() => setCurrentView('location')}>
@@ -765,10 +782,10 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
                 <h3 className="text-xl font-bold text-center mb-4 dark:text-white">Complete Order</h3>
 
                 {/* TOGGLE: Delivery / Pickup */}
-                <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl mb-4">
+                {/* <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl mb-4">
                     <button onClick={() => setOrderType('delivery')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${orderType === 'delivery' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>Delivery</button>
                     <button onClick={() => setOrderType('pickup')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${orderType === 'pickup' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>Pickup</button>
-                </div>
+                </div> */}
 
                 <div className="space-y-3">
                     {orderType === 'delivery' && (
@@ -829,9 +846,9 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
                     <button onClick={() => setActiveMethod('paystack')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'paystack' ? 'bg-white dark:bg-gray-700 shadow text-green-600 dark:text-white' : 'text-gray-400'}`}>
                         <div className="flex items-center justify-center gap-2"><CreditCard className="w-4 h-4" /> Paystack</div>
                     </button>
-                    <button onClick={() => setActiveMethod('crypto')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'crypto' ? 'bg-indigo-500 text-white shadow' : 'text-gray-400'}`}>
+                    {/* <button onClick={() => setActiveMethod('crypto')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'crypto' ? 'bg-indigo-500 text-white shadow' : 'text-gray-400'}`}>
                         <div className="flex items-center justify-center gap-2"><Wallet className="w-4 h-4" /> Crypto</div>
-                    </button>
+                    </button> */}
                 </div>
 
                 {activeMethod === 'paystack' ? (
@@ -862,7 +879,7 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
                         {cart.length > 0 && (
                             <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-xl flex">
                                 <button onClick={() => setPaymentMethod('paystack')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${paymentMethod === 'paystack' ? 'bg-white shadow dark:bg-gray-700 dark:text-white' : 'text-gray-500'}`}><CreditCard className="w-4 h-4" /> Paystack</button>
-                                <button onClick={() => setPaymentMethod('crypto')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${paymentMethod === 'crypto' ? 'bg-indigo-500 text-white shadow' : 'text-gray-500'}`}><Wallet className="w-4 h-4" /> Crypto</button>
+                                {/* <button onClick={() => setPaymentMethod('crypto')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${paymentMethod === 'crypto' ? 'bg-indigo-500 text-white shadow' : 'text-gray-500'}`}><Wallet className="w-4 h-4" /> Crypto</button> */}
                             </div>
                         )}
                         <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="text-2xl font-black dark:text-white">₦{cartTotal.toLocaleString()}</span></div>

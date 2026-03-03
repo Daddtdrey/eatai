@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share
 } from 'lucide-react';
-import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors } from './firebase.js';
+import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors, logVisit } from './firebase.js';
 import { onAuthStateChanged } from 'firebase/auth';
 
 // 🟢 IMPORT MODULES
@@ -82,6 +82,15 @@ export default function EatAi() {
     useEffect(() => { localStorage.setItem('eatai_view', currentView); }, [currentView]);
     useEffect(() => { localStorage.setItem('eatai_cart', JSON.stringify(cart)); }, [cart]);
     useEffect(() => { localStorage.setItem('eatai_favorites', JSON.stringify(favorites)); }, [favorites]);
+
+    // Visitor Tracking Effect
+    useEffect(() => {
+        const today = new Date().toISOString().split('T')[0];
+        if (sessionStorage.getItem('eatai_visited') !== today) {
+            logVisit();
+            sessionStorage.setItem('eatai_visited', today);
+        }
+    }, []);
 
     // Dark Mode Effect
     useEffect(() => {
@@ -448,7 +457,7 @@ export default function EatAi() {
 
                 <nav className="flex-none bg-white/90 backdrop-blur-md dark:bg-gray-900/90 border-t border-gray-200 dark:border-gray-800 px-6 py-3 flex justify-around items-center z-40 safe-area-pb">
                     <button onClick={() => setCurrentView('home')} className={`flex flex-col items-center ${currentView === 'home' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Home className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Home</span></button>
-                    <button onClick={() => setCurrentView('wallet')} className={`flex flex-col items-center ${currentView === 'wallet' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Wallet className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Crypto</span></button>
+                    {/* <button onClick={() => setCurrentView('wallet')} className={`flex flex-col items-center ${currentView === 'wallet' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Wallet className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Crypto</span></button> */}
                     <button onClick={() => setCurrentView('decider')} className={`flex-col items-center hidden md:flex ${currentView === 'decider' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><ChefHat className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Chef</span></button>
                     <button onClick={() => setCurrentView('location')} className={`flex flex-col items-center ${['location', 'vendors', 'market'].includes(currentView) ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Search className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Market</span></button>
                     <button onClick={() => setCurrentView('cart')} className={`flex flex-col items-center relative ${currentView === 'cart' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><ShoppingCart className="w-6 h-6" />{cart.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full font-bold">{cart.length}</span>}<span className="text-[10px] mt-1 font-medium">Cart</span></button>

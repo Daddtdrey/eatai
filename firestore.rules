@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- HELPER FUNCTIONS ---
+    function isSignedIn() { return request.auth != null; }
+    
+    function isSuper() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.token.email)) && 
+             get(/databases/$(database)/documents/admins/$(request.auth.token.email)).data.role == 'super';
+    }
+
+    function isVendor() {
+       return isSignedIn() && 
+              exists(/databases/$(database)/documents/admins/$(request.auth.token.email)) && 
+              (get(/databases/$(database)/documents/admins/$(request.auth.token.email)).data.role == 'sub' || 
+               get(/databases/$(database)/documents/admins/$(request.auth.token.email)).data.role == 'vendor');
+    }
+    
+    function isLogistics() {
+       return isSignedIn() && 
+              exists(/databases/$(database)/documents/admins/$(request.auth.token.email)) && 
+              get(/databases/$(database)/documents/admins/$(request.auth.token.email)).data.role == 'logistics';
+    }
+
+    // --- RULES ---
+
+    // 1. NOTIFICATIONS: Allow users to save their tokens
+    match /notifications/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 2. PRODUCTS: Everyone read, Admins write
+    match /products/{productId} {
+      allow read: if true;
+      allow create, delete: if isSuper() || isVendor();
+      allow update: if isSignedIn(); // Allow stock updates during purchase
+    }
+
+    // 3. ORDERS: Read/Write rules
+    match /orders/{orderId} {
+      allow create: if isSignedIn();
+      allow read: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSuper();
+    }
+
+    // 4. USERS
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // 5. ADMINS
+    match /admins/{email} {
+      allow read: if isSignedIn(); // Allow role checking
+      allow write: if isSuper();
+    }
+    
+    // 6. VENDORS
+    match /vendors/{vendorId} {
+      allow read: if true;
+      allow write: if isSuper();
+    }
+
+    // 7. BANNERS: Everyone reads, Admins write
+    match /banners/{document=**} {
+      allow read: if true;
+      allow write: if isSuper();
+    }
+
+    // 8. SITE STATS: Everyone can increment visitor count, Admins read history
+    match /site_stats/{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

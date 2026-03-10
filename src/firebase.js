@@ -194,6 +194,33 @@ export const saveVendorSides = async (vendorName, sides) => {
   } catch (e) { console.error(e); }
 };
 
+// 🟢 NEW: Save vendor GPS location (and optionally opening hours)
+export const saveVendorLocation = async (vendorName, lat, lng, openTime, closeTime) => {
+  try {
+    const payload = { lat, lng };
+    if (openTime !== undefined) payload.openTime = openTime;
+    if (closeTime !== undefined) payload.closeTime = closeTime;
+    await setDoc(doc(db, "vendors", vendorName), payload, { merge: true });
+    return true;
+  } catch (e) { console.error(e); return false; }
+};
+
+// 🟢 NEW: Fetch all vendors with their GPS coords (for super admin location manager)
+export const getVendorsWithLocation = async () => {
+  try {
+    const snapshot = await getDocs(collection(db, "vendors"));
+    return snapshot.docs.map(d => ({
+      id: d.id,
+      name: d.data().name || d.id,
+      lat: d.data().lat || null,
+      lng: d.data().lng || null,
+      location: d.data().location || null,
+      openTime: d.data().openTime || null,
+      closeTime: d.data().closeTime || null,
+    }));
+  } catch (e) { console.error(e); return []; }
+};
+
 // 🟢 CRITICAL: This fetches the vendors for the dropdown
 export const getGlobalVendors = async () => {
   try {
@@ -224,11 +251,13 @@ export const getGlobalVendors = async () => {
           }
         });
 
-        // Store metadata
+        // Store metadata (including GPS coords for delivery pricing)
         vendorMetadata[doc.id] = {
-          openTime: data.openTime || "07:00",
+          openTime: data.openTime || "06:00",
           closeTime: data.closeTime || "18:20",
-          logo: data.logo
+          logo: data.logo,
+          lat: data.lat || null,
+          lng: data.lng || null,
         };
       }
     });
@@ -292,7 +321,7 @@ export const deleteProduct = async (id) => { await deleteDoc(doc(db, "products",
 // 5. ORDERS & REVIEWS
 // ==========================================
 
-export const createOrder = async (userId, cart, total, paymentMethod, walletAddress, address, transferName, phone, landmark, deliveryFee, status = 'pending', orderType = 'delivery', deliveryNote = '', customOrderId = null) => {
+export const createOrder = async (userId, cart, total, paymentMethod, walletAddress, address, transferName, phone, landmark, deliveryFee, status = 'pending', orderType = 'delivery', deliveryNote = '', customOrderId = null, customerLat = null, customerLng = null) => {
   try {
     // Sanitize: Firestore doesn't allow undefined values
     const sanitize = (obj) => JSON.parse(JSON.stringify(obj, (k, v) => v === undefined ? null : v));
@@ -332,7 +361,8 @@ export const createOrder = async (userId, cart, total, paymentMethod, walletAddr
         walletAddress: walletAddress || null, deliveryAddress: orderType === 'pickup' ? 'PICKUP' : address,
         phone, landmark: orderType === 'pickup' ? 'PICKUP' : landmark, deliveryFee,
         transferName: transferName || null, status: status, orderType, createdAt: new Date().toISOString(),
-        deliveryNote: deliveryNote || null
+        deliveryNote: deliveryNote || null,
+        customerLat: customerLat || null, customerLng: customerLng || null,
       }));
     });
     return finalOrderId;
@@ -575,7 +605,25 @@ export const getTodayVisitors = async () => {
 };
 
 // ==========================================
-// 10. EXPORTS
+// 10. DELIVERY PRICING CONFIG
+// ==========================================
+
+export const getDeliveryPricingConfig = async () => {
+  try {
+    const snap = await getDoc(doc(db, 'settings', 'delivery_pricing'));
+    return snap.exists() ? snap.data() : null;
+  } catch (e) { return null; }
+};
+
+export const saveDeliveryPricingConfig = async (config) => {
+  try {
+    await setDoc(doc(db, 'settings', 'delivery_pricing'), config, { merge: true });
+    return true;
+  } catch (e) { console.error(e); return false; }
+};
+
+// ==========================================
+// 11. EXPORTS
 // ==========================================
 
 export { collection, doc, query, where, onSnapshot, orderBy, limit, startAfter };

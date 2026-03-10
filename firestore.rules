@@ -57,7 +57,7 @@ service cloud.firestore {
       allow write: if isSuper();
     }
     
-    // 6. VENDORS
+    // 6. VENDORS — super admin only
     match /vendors/{vendorId} {
       allow read: if true;
       allow write: if isSuper();
@@ -72,6 +72,12 @@ service cloud.firestore {
     // 8. SITE STATS: Everyone can increment visitor count, Admins read history
     match /site_stats/{document=**} {
       allow read, write: if true;
+    }
+
+    // 9. SETTINGS (delivery pricing config etc.)
+    match /settings/{document=**} {
+      allow read: if true;
+      allow write: if isSuper();
     }
   }
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     ChefHat, ShoppingBag, Package, Store, ArrowLeft, LogIn,
     ShoppingCart, CreditCard, Wallet, MapPin, Leaf, Beef, Zap, Cookie,
@@ -17,6 +17,7 @@ import {
     signUpWithEmail, logInWithEmail, saveStockRequest, getBanners
 } from '../firebase.js';
 import { LOCATIONS, VENDORS_BY_LOCATION, PAYSTACK_KEY, BANK_DETAILS, calculateDeliveryFee, GEMINI_API_KEY, DELIVERY_ZONES } from '../config.js';
+import { getAutoDeliveryFee, isMultiVendorCart, DEFAULT_PRICING } from '../deliveryPricing.js';
 
 // ==========================================
 // 1. 🟢 REDESIGNED LOGIN VIEW (Full Screen + Background)
@@ -105,8 +106,8 @@ export const LoginView = () => {
     );
 };
 
-// --- 2. HOME VIEW (HUNGRY ORANGE THEME) ---
-export const HomeView = ({ setCurrentView, user }) => {
+// --- 2. HOME VIEW ---
+export const HomeView = ({ setCurrentView, user, setVendor, setCity }) => {
     const [hasPermission, setHasPermission] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [banners, setBanners] = useState([]);
@@ -121,6 +122,51 @@ export const HomeView = ({ setCurrentView, user }) => {
     const handleNotificationClick = async () => {
         const token = await requestNotificationPermission(user.uid);
         if (token) setHasPermission(true);
+    };
+
+    // Food categories — each links to the vendor that sells it
+    const FOOD_CATEGORIES = [
+        {
+            label: 'Shawarma',
+            emoji: '🌯',
+            img: 'https://images.unsplash.com/photo-1561651823-34feb02250e4?w=200&q=80',
+            vendor: 'Jaybee Shawarma',
+            city: 'Ekpoma',
+        },
+        {
+            label: 'Jollof Rice',
+            emoji: '🍚',
+            img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767032932/Nigerian_Jollof_rice__fried_plantains_and_chicken_-removebg-preview_jthyvl.png',
+            vendor: 'Big taste',
+            city: 'Ekpoma',
+        },
+        {
+            label: 'Burger',
+            emoji: '🍔',
+            img: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=200&q=80',
+            vendor: 'Phattie Burger',
+            city: 'Ekpoma',
+        },
+        {
+            label: 'Snacks',
+            emoji: '🍟',
+            img: 'https://images.unsplash.com/photo-1576107232684-1279f390859f?w=200&q=80',
+            vendor: 'Golden Bite',
+            city: 'Ekpoma',
+        },
+        {
+            label: 'Drinks',
+            emoji: '🥤',
+            img: 'https://images.unsplash.com/photo-1544145945-f90425340c7e?w=200&q=80',
+            vendor: 'Obest',
+            city: 'Ekpoma',
+        },
+    ];
+
+    const handleFoodCategoryTap = (cat) => {
+        if (setCity) setCity(cat.city);
+        if (setVendor) setVendor(cat.vendor);
+        setCurrentView('market');
     };
 
     // Mock Data for Top Vendors
@@ -168,6 +214,34 @@ export const HomeView = ({ setCurrentView, user }) => {
                 </div>
             </div>
 
+            {/* 🟢 WHAT ARE YOU CRAVING? — sticky food tiles above content */}
+            <div className="px-5 pt-3 pb-3 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 sticky top-[72px] z-10">
+                <div className="flex justify-between items-center mb-2">
+                    <h3 className="text-gray-900 dark:text-white font-bold text-sm font-[Fredoka]">What are you craving?</h3>
+                    <span onClick={() => setCurrentView('market')} className="text-orange-500 text-[10px] font-bold cursor-pointer hover:underline">See all</span>
+                </div>
+                <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1 -mx-1 px-1">
+                    {FOOD_CATEGORIES.map((cat, i) => (
+                        <button
+                            key={i}
+                            onClick={() => handleFoodCategoryTap(cat)}
+                            className="shrink-0 flex flex-col items-center gap-1 active:scale-95 transition-transform group"
+                        >
+                            <div className="w-14 h-14 rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 border-2 border-transparent group-hover:border-orange-400 transition-all shadow-sm relative">
+                                <img
+                                    src={cat.img}
+                                    alt={cat.label}
+                                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                                    onError={e => { e.target.style.display = 'none'; e.target.parentElement.innerHTML = `<div class='w-full h-full flex items-center justify-center text-2xl'>${cat.emoji}</div>`; }}
+                                />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
+                            </div>
+                            <span className="text-[10px] font-bold text-gray-600 dark:text-gray-300">{cat.label}</span>
+                        </button>
+                    ))}
+                </div>
+            </div>
+
             <div className="p-6 space-y-6">
 
                 {/* PROMO BANNERS */}
@@ -191,7 +265,7 @@ export const HomeView = ({ setCurrentView, user }) => {
 
                     <div className="relative z-10 pl-8 w-1/2 flex flex-col justify-center h-full">
                         <span className="bg-white/20 backdrop-blur-md text-white text-[10px] font-black px-3 py-1 rounded-full mb-3 inline-block w-fit tracking-wide border border-white/10">FAST DELIVERY ⚡</span>
-                        <h2 className="text-4xl font-black text-white leading-none mb-3 font-[Fredoka] drop-shadow-md">Hungry?<br /><span className="text-orange-100 text-3xl">Eat Now.</span></h2>
+                        <h2 className="text-4xl font-black text-white leading-none mb-3 font-[Fredoka] drop-shadow-md">What are<br />you craving?<br /><span className="text-orange-100 text-2xl">Eat Now.</span></h2>
                         <span className="text-white/90 text-xs font-bold flex items-center gap-2 group-hover:text-orange-100 transition-colors">Order Food <div className="bg-white text-orange-600 rounded-full p-1 shadow-sm"><ArrowLeft className="w-3 h-3 rotate-180" /></div></span>
                     </div>
 
@@ -252,18 +326,6 @@ export const HomeView = ({ setCurrentView, user }) => {
                     </div>
                 </div>
 
-                {/* CATEGORIES */}
-                <div>
-                    <h3 className="text-gray-900 dark:text-white font-bold text-lg mb-3 font-[Fredoka]">Categories</h3>
-                    <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2">
-                        {['Rice', 'Soup', 'Snacks', 'Drinks', 'Grill'].map((cat, i) => (
-                            <div key={i} onClick={() => setCurrentView('location')} className="min-w-[70px] h-20 bg-white dark:bg-gray-900 rounded-2xl flex flex-col items-center justify-center border border-gray-100 dark:border-gray-800 shadow-sm shrink-0 active:scale-95 transition-transform cursor-pointer hover:border-orange-200">
-                                <div className="text-2xl mb-1">{['🍚', '🍲', '🍩', '🥤', '🍗'][i]}</div>
-                                <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400">{cat}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
             </div>
         </div>
     );
@@ -275,221 +337,221 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
 
     return (
         <ViewContainer title="Select Location" showBack onBack={() => setCurrentView('home')}>
-            <div className="grid grid-cols-1 gap-3 mt-2">
-                {displayLocations.map((loc) => (
-                    <button key={loc} onClick={() => { setCity(loc); setCurrentView('vendors'); }} className="group p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 flex items-center justify-between hover:border-orange-500 hover:shadow-lg hover:shadow-orange-500/10 transition-all active:scale-[0.98]">
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-orange-50 dark:bg-gray-800 rounded-full flex items-center justify-center text-2xl group-hover:scale-110 transition-transform">📍</div>
-                            <div className="text-left">
-                                <h3 className="text-lg font-black text-gray-800 dark:text-white font-[Fredoka]">{loc}</h3>
-                                <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Browse vendors</p>
+                <div className="grid grid-cols-1 gap-3 mt-2">
+                    {displayLocations.map((loc) => (
+                        <button key={loc} onClick={() => { setCity(loc); setCurrentView('vendors'); }} className="group p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 flex items-center justify-between hover:border-orange-500 hover:shadow-lg hover:shadow-orange-500/10 transition-all active:scale-[0.98]">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-orange-50 dark:bg-gray-800 rounded-full flex items-center justify-center text-2xl group-hover:scale-110 transition-transform">📍</div>
+                                <div className="text-left">
+                                    <h3 className="text-lg font-black text-gray-800 dark:text-white font-[Fredoka]">{loc}</h3>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Browse vendors</p>
+                                </div>
                             </div>
-                        </div>
-                        <ArrowLeft className="w-5 h-5 text-gray-300 group-hover:text-orange-500 rotate-180 transition-colors" />
-                    </button>
-                ))}
-            </div>
-        </ViewContainer>
-    );
+                            <ArrowLeft className="w-5 h-5 text-gray-300 group-hover:text-orange-500 rotate-180 transition-colors" />
+                        </button>
+                    ))}
+                </div>
+            </ViewContainer>
+            );
 };
 
-// --- 4. VENDOR SELECTOR ---
-export const VendorSelectionView = ({ city, setVendor, setCurrentView, vendorLogos, vendorsByLocation }) => {
+            // --- 4. VENDOR SELECTOR ---
+            export const VendorSelectionView = ({city, setVendor, setCurrentView, vendorLogos, vendorsByLocation}) => {
     const vendors = (vendorsByLocation && vendorsByLocation[city]) ? vendorsByLocation[city] : (VENDORS_BY_LOCATION[city] || []);
 
-    return (
-        <ViewContainer title={`${city} Vendors`} showBack onBack={() => setCurrentView('location')}>
-            <div className="grid grid-cols-1 gap-3 mt-2">
-                {vendors.map((vendor) => (
-                    <button key={vendor} onClick={() => { setVendor(vendor); setCurrentView('market'); }} className="group p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 flex items-center justify-between hover:border-orange-500 hover:shadow-lg hover:shadow-orange-500/10 transition-all active:scale-[0.98]">
-                        <div className="flex items-center gap-4">
-                            <div className="w-14 h-14 rounded-xl flex items-center justify-center overflow-hidden bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-1">
-                                {vendorLogos && vendorLogos[vendor] ? (
-                                    <img src={vendorLogos[vendor]} alt={vendor} className="w-full h-full object-cover rounded-lg" />
-                                ) : (
-                                    <Store className="w-6 h-6 text-orange-400" />
-                                )}
+            return (
+            <ViewContainer title={`${city} Vendors`} showBack onBack={() => setCurrentView('location')}>
+                <div className="grid grid-cols-1 gap-3 mt-2">
+                    {vendors.map((vendor) => (
+                        <button key={vendor} onClick={() => { setVendor(vendor); setCurrentView('market'); }} className="group p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 flex items-center justify-between hover:border-orange-500 hover:shadow-lg hover:shadow-orange-500/10 transition-all active:scale-[0.98]">
+                            <div className="flex items-center gap-4">
+                                <div className="w-14 h-14 rounded-xl flex items-center justify-center overflow-hidden bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-1">
+                                    {vendorLogos && vendorLogos[vendor] ? (
+                                        <img src={vendorLogos[vendor]} alt={vendor} className="w-full h-full object-cover rounded-lg" />
+                                    ) : (
+                                        <Store className="w-6 h-6 text-orange-400" />
+                                    )}
+                                </div>
+                                <div className="text-left">
+                                    <h3 className="text-lg font-bold text-gray-800 dark:text-white font-[Fredoka]">{vendor}</h3>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">View Menu</p>
+                                </div>
                             </div>
-                            <div className="text-left">
-                                <h3 className="text-lg font-bold text-gray-800 dark:text-white font-[Fredoka]">{vendor}</h3>
-                                <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">View Menu</p>
-                            </div>
-                        </div>
-                        <ArrowLeft className="w-5 h-5 text-gray-300 group-hover:text-orange-500 rotate-180 transition-colors" />
-                    </button>
-                ))}
-            </div>
-        </ViewContainer>
-    );
+                            <ArrowLeft className="w-5 h-5 text-gray-300 group-hover:text-orange-500 rotate-180 transition-colors" />
+                        </button>
+                    ))}
+                </div>
+            </ViewContainer>
+            );
 };
 
-// 🟢 UPDATED: Market Product Card with Modal Support
-const MarketProductCard = ({ item, onInteract, isOpen, onNotify }) => {
+            // 🟢 UPDATED: Market Product Card with Modal Support
+            const MarketProductCard = ({item, onInteract, isOpen, onNotify}) => {
     const [showModal, setShowModal] = useState(false);
-    const [imgError, setImgError] = useState(false);
+            const [imgError, setImgError] = useState(false);
 
-    const stock = item.stock || 0;
-    const isSoldOut = stock === 0;
+            const stock = item.stock || 0;
+            const isSoldOut = stock === 0;
     const isLowStock = stock > 0 && stock < 10;
 
     const handleOpenModal = () => {
         if (!isOpen) {
-            alert("Vendor is currently closed.");
+                alert("Vendor is currently closed.");
             return;
         }
-        setShowModal(true);
+            setShowModal(true);
     };
 
     const handleAddToCart = (product, sideName, sidePrice) => {
-        onInteract(product, sideName, sidePrice);
+                onInteract(product, sideName, sidePrice);
     };
 
-    return (
-        <>
-            {/* Simplified Product Card - No inline quantity/sides selectors */}
-            <div className={`relative bg-white dark:bg-gray-900 rounded-3xl border-2 border-orange-50/50 dark:border-gray-800 p-3 flex gap-4 transition-all active:scale-[0.99] shadow-sm hover:shadow-md cursor-pointer group ${isSoldOut ? 'opacity-75' : ''}`} onClick={handleOpenModal}>
-                <div className="w-28 h-28 bg-gray-100 dark:bg-gray-800 rounded-2xl overflow-hidden shrink-0 relative shadow-inner">
-                    {item.imageUrl && !imgError ? (
-                        <img src={item.imageUrl} alt={item.name} className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 ${isSoldOut ? 'grayscale' : ''}`} onError={() => setImgError(true)} />
-                    ) : (
-                        <div className="flex items-center justify-center h-full text-4xl"><span>{item.image || '🥘'}</span></div>
-                    )}
-                    {isSoldOut && (
-                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                            <span className="text-white text-[10px] font-black uppercase bg-red-500 px-2 py-1 rounded-lg transform -rotate-12">Sold Out</span>
-                        </div>
-                    )}
-                </div>
-
-                <div className="flex-1 flex flex-col justify-between py-1 min-w-0">
-                    <div>
-                        <div className="flex justify-between items-start">
-                            <h4 className="font-bold text-gray-900 dark:text-white text-base leading-tight line-clamp-2 font-[Fredoka]">{item.name}</h4>
-                            {isSoldOut && (
-                                <button onClick={(e) => { e.stopPropagation(); onNotify(item); }} className="p-2 bg-orange-100 dark:bg-gray-800 rounded-xl text-orange-600 hover:bg-orange-200 active:scale-90 transition-all">
-                                    <BellRing className="w-4 h-4" />
-                                </button>
-                            )}
-                        </div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{item.desc || "Fresh & tasty."}</p>
-                        {isLowStock && !isSoldOut && (
-                            <span className="text-[10px] text-orange-600 font-bold mt-1 block animate-pulse">🔥 Only {stock} left!</span>
+            return (
+            <>
+                {/* Simplified Product Card - No inline quantity/sides selectors */}
+                <div className={`relative bg-white dark:bg-gray-900 rounded-3xl border-2 border-orange-50/50 dark:border-gray-800 p-3 flex gap-4 transition-all active:scale-[0.99] shadow-sm hover:shadow-md cursor-pointer group ${isSoldOut ? 'opacity-75' : ''}`} onClick={handleOpenModal}>
+                    <div className="w-28 h-28 bg-gray-100 dark:bg-gray-800 rounded-2xl overflow-hidden shrink-0 relative shadow-inner">
+                        {item.imageUrl && !imgError ? (
+                            <img src={item.imageUrl} alt={item.name} className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 ${isSoldOut ? 'grayscale' : ''}`} onError={() => setImgError(true)} />
+                        ) : (
+                            <div className="flex items-center justify-center h-full text-4xl"><span>{item.image || '🥘'}</span></div>
+                        )}
+                        {isSoldOut && (
+                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                                <span className="text-white text-[10px] font-black uppercase bg-red-500 px-2 py-1 rounded-lg transform -rotate-12">Sold Out</span>
+                            </div>
                         )}
                     </div>
 
-                    <div className="flex items-center justify-between mt-2">
-                        <span className="font-black text-gray-900 dark:text-white text-xl">₦{item.price.toLocaleString()}</span>
+                    <div className="flex-1 flex flex-col justify-between py-1 min-w-0">
+                        <div>
+                            <div className="flex justify-between items-start">
+                                <h4 className="font-bold text-gray-900 dark:text-white text-base leading-tight line-clamp-2 font-[Fredoka]">{item.name}</h4>
+                                {isSoldOut && (
+                                    <button onClick={(e) => { e.stopPropagation(); onNotify(item); }} className="p-2 bg-orange-100 dark:bg-gray-800 rounded-xl text-orange-600 hover:bg-orange-200 active:scale-90 transition-all">
+                                        <BellRing className="w-4 h-4" />
+                                    </button>
+                                )}
+                            </div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{item.desc || "Fresh & tasty."}</p>
+                            {isLowStock && !isSoldOut && (
+                                <span className="text-[10px] text-orange-600 font-bold mt-1 block animate-pulse">🔥 Only {stock} left!</span>
+                            )}
+                        </div>
 
-                        <button
-                            onClick={(e) => { e.stopPropagation(); handleOpenModal(); }}
-                            disabled={isSoldOut}
-                            className={`h-10 px-5 rounded-2xl font-bold text-xs flex items-center gap-1 transition-all shadow-lg ${isSoldOut
-                                ? 'bg-gray-100 text-gray-400 cursor-not-allowed shadow-none'
-                                : 'bg-orange-500 text-white hover:bg-orange-600 shadow-orange-500/30 active:scale-90'
-                                }`}
-                        >
-                            {isSoldOut ? "Closed" : "View"}
-                        </button>
+                        <div className="flex items-center justify-between mt-2">
+                            <span className="font-black text-gray-900 dark:text-white text-xl">₦{item.price.toLocaleString()}</span>
+
+                            <button
+                                onClick={(e) => { e.stopPropagation(); handleOpenModal(); }}
+                                disabled={isSoldOut}
+                                className={`h-10 px-5 rounded-2xl font-bold text-xs flex items-center gap-1 transition-all shadow-lg ${isSoldOut
+                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed shadow-none'
+                                    : 'bg-orange-500 text-white hover:bg-orange-600 shadow-orange-500/30 active:scale-90'
+                                    }`}
+                            >
+                                {isSoldOut ? "Closed" : "View"}
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            {/* Product Detail Modal */}
-            <ProductDetailModal
-                isOpen={showModal}
-                product={item}
-                onClose={() => setShowModal(false)}
-                onAddToCart={handleAddToCart}
-                isVendorOpen={isOpen}
-            />
-        </>
-    );
+                {/* Product Detail Modal */}
+                <ProductDetailModal
+                    isOpen={showModal}
+                    product={item}
+                    onClose={() => setShowModal(false)}
+                    onAddToCart={handleAddToCart}
+                    isVendorOpen={isOpen}
+                />
+            </>
+            );
 };
 
 
 
-// --- 5. MARKET VIEW (WITH OPENING HOURS CHECK) ---
-export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData, city, vendor, user, vendorMetadata, onLoadMore, hasMore, isLoadingMore }) => {
+            // --- 5. MARKET VIEW (WITH OPENING HOURS CHECK) ---
+            export const MarketView = ({setCurrentView, addToCart, marketData, loadingData, city, vendor, user, vendorMetadata, onLoadMore, hasMore, isLoadingMore}) => {
     const [category, setCategory] = useState('All');
-    // 🟢 CHECK HOURS
-    const currentHour = new Date().getHours();
-    const currentMinute = new Date().getMinutes();
-    const currentTime = currentHour + (currentMinute / 60);
+            // 🟢 CHECK HOURS
+            const currentHour = new Date().getHours();
+            const currentMinute = new Date().getMinutes();
+            const currentTime = currentHour + (currentMinute / 60);
 
-    const vendorInfo = vendorMetadata?.[vendor] || {};
-    const openTime = parseFloat(vendorInfo.openTime?.replace(':', '.') || "8.00");
-    const closeTime = parseFloat(vendorInfo.closeTime?.replace(':', '.') || "22.00");
+            const vendorInfo = vendorMetadata?.[vendor] || { };
+            const openTime = parseFloat(vendorInfo.openTime?.replace(':', '.') || "8.00");
+            const closeTime = parseFloat(vendorInfo.closeTime?.replace(':', '.') || "22.00");
 
     const isOpen = currentTime >= openTime && currentTime < closeTime;
 
     const handleNotify = async (item) => {
         if (!user) return alert("Please login first.");
-        try {
+            try {
             const success = await saveStockRequest(item, user.uid, user.email);
             if (success) alert(`🔔 Alert set for ${item.name}!`);
-        } catch (e) { console.error(e); }
+        } catch (e) {console.error(e); }
     };
 
-    if (loadingData && marketData.length === 0) return <div className="flex justify-center items-center h-full"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div>;
+            if (loadingData && marketData.length === 0) return <div className="flex justify-center items-center h-full"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div>;
 
     const items = marketData.filter(p => {
         const productVendor = p.vendor ? p.vendor.toLowerCase() : "";
-        const selectedVendor = vendor ? vendor.toLowerCase() : "";
-        const vendorMatch = productVendor.includes(selectedVendor) || selectedVendor.includes(productVendor);
-        const categoryMatch = category === 'All' ? true : p.category === category;
-        if (vendorMatch) return categoryMatch;
-        const locationMatch = !p.location || (p.location && city && p.location.toLowerCase() === city.toLowerCase());
-        return locationMatch && vendorMatch && categoryMatch;
+            const selectedVendor = vendor ? vendor.toLowerCase() : "";
+            const vendorMatch = productVendor.includes(selectedVendor) || selectedVendor.includes(productVendor);
+            const categoryMatch = category === 'All' ? true : p.category === category;
+            if (vendorMatch) return categoryMatch;
+            const locationMatch = !p.location || (p.location && city && p.location.toLowerCase() === city.toLowerCase());
+            return locationMatch && vendorMatch && categoryMatch;
     });
 
-    const categories = [{ id: 'All', label: 'All', icon: null }, { id: 'fullMeal', label: 'Meals', icon: ShoppingBag }, { id: 'cravings', label: 'Cravings', icon: Heart }, { id: 'pregnancy', label: 'Pregnancy', icon: Baby }];
+            const categories = [{id: 'All', label: 'All', icon: null }, {id: 'fullMeal', label: 'Meals', icon: ShoppingBag }, {id: 'cravings', label: 'Cravings', icon: Heart }, {id: 'pregnancy', label: 'Pregnancy', icon: Baby }];
 
-    return (
-        <ViewContainer title={`${vendor} Menu`} showBack onBack={() => setCurrentView('vendors')}>
-            {/* 🟢 CLOSED BANNER */}
-            {!isOpen && (
-                <div className="bg-red-500 text-white p-3 rounded-xl mb-4 flex items-center justify-between shadow-md">
-                    <div className="flex items-center gap-2">
-                        <Clock className="w-5 h-5" />
-                        <span className="font-bold text-sm">Closed (Opens {vendorInfo.openTime || "8:00"})</span>
+            return (
+            <ViewContainer title={`${vendor} Menu`} showBack onBack={() => setCurrentView('vendors')}>
+                {/* 🟢 CLOSED BANNER */}
+                {!isOpen && (
+                    <div className="bg-red-500 text-white p-3 rounded-xl mb-4 flex items-center justify-between shadow-md">
+                        <div className="flex items-center gap-2">
+                            <Clock className="w-5 h-5" />
+                            <span className="font-bold text-sm">Closed (Opens {vendorInfo.openTime || "8:00"})</span>
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide px-1">{categories.map(cat => (<DietaryFilter key={cat.id} icon={cat.icon} label={cat.label} active={category === cat.id} onClick={() => setCategory(cat.id)} />))}</div>
+
+                <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide min-h-0">
+                    <div className="grid grid-cols-1 gap-4 pb-4">{items.map((item) => (
+                        <MarketProductCard
+                            key={item.id}
+                            item={item}
+                            onInteract={isOpen ? addToCart : () => alert("Vendor is currently closed.")}
+                            isOpen={isOpen}
+                            onNotify={handleNotify}
+                        />
+                    ))}
+                        {hasMore && (
+                            <button onClick={onLoadMore} disabled={isLoadingMore} className="w-full py-3 bg-gray-100 dark:bg-gray-800 text-gray-500 font-bold rounded-xl mt-4 active:scale-95">
+                                {isLoadingMore ? "Loading..." : "Load More Food 🍲"}
+                            </button>
+                        )}
                     </div>
                 </div>
-            )}
-
-            <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide px-1">{categories.map(cat => (<DietaryFilter key={cat.id} icon={cat.icon} label={cat.label} active={category === cat.id} onClick={() => setCategory(cat.id)} />))}</div>
-
-            <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide min-h-0">
-                <div className="grid grid-cols-1 gap-4 pb-4">{items.map((item) => (
-                    <MarketProductCard
-                        key={item.id}
-                        item={item}
-                        onInteract={isOpen ? addToCart : () => alert("Vendor is currently closed.")}
-                        isOpen={isOpen}
-                        onNotify={handleNotify}
-                    />
-                ))}
-                    {hasMore && (
-                        <button onClick={onLoadMore} disabled={isLoadingMore} className="w-full py-3 bg-gray-100 dark:bg-gray-800 text-gray-500 font-bold rounded-xl mt-4 active:scale-95">
-                            {isLoadingMore ? "Loading..." : "Load More Food 🍲"}
-                        </button>
-                    )}
-                </div>
-            </div>
-        </ViewContainer>
-    );
+            </ViewContainer>
+            );
 };
 
-// --- 6. ORDERS VIEW ---
-export const OrdersView = ({ setCurrentView, user }) => {
+            // --- 6. ORDERS VIEW ---
+            export const OrdersView = ({setCurrentView, user}) => {
     const [orders, setOrders] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [selectedOrder, setSelectedOrder] = useState(null);
-    const [retryingOrderId, setRetryingOrderId] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [selectedOrder, setSelectedOrder] = useState(null);
+            const [retryingOrderId, setRetryingOrderId] = useState(null);
 
     useEffect(() => {
         const q = query(collection(db, "orders"), where("userId", "==", user.uid));
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            const data = snapshot.docs.map(d => ({id: d.id, ...d.data() }));
             setOrders(data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
             setLoading(false);
         });
@@ -498,24 +560,24 @@ export const OrdersView = ({ setCurrentView, user }) => {
 
     const handleRateProduct = async (productId, rating, comment, orderId) => {
         if (!user) return;
-        try {
-            const { addReview } = await import('../firebase.js');
+            try {
+            const {addReview} = await import('../firebase.js');
             await addReview(productId, user.uid, user.displayName, rating, comment, orderId);
-        } catch (e) { console.error(e); }
+        } catch (e) {console.error(e); }
     };
 
-    // 🟢 RETRY: Reopen Paystack for a pending order
-    const RetryPayButton = ({ order }) => {
+            // 🟢 RETRY: Reopen Paystack for a pending order
+            const RetryPayButton = ({order}) => {
         const retryRef = `${order.id}_retry_${Date.now()}`;
-        const initRetryPayment = usePaystackPayment({
-            reference: retryRef,
+            const initRetryPayment = usePaystackPayment({
+                reference: retryRef,
             email: user?.email,
             amount: order.total * 100,
             publicKey: PAYSTACK_KEY,
-            metadata: { orderId: order.id },
+            metadata: {orderId: order.id },
         });
 
-        return (
+            return (
             <button
                 onClick={(e) => {
                     e.stopPropagation();
@@ -533,340 +595,533 @@ export const OrdersView = ({ setCurrentView, user }) => {
                     <><CreditCard className="w-3 h-3" /> Pay Now — ₦{order.total.toLocaleString()}</>
                 )}
             </button>
-        );
+            );
     };
 
-    return (
-        <ViewContainer title="My Orders" showBack onBack={() => setCurrentView('home')}>
-            {selectedOrder && <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} onRate={handleRateProduct} />}
-            {loading ? <div className="flex justify-center p-10"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div> : orders.length === 0 ? <div className="text-center mt-10 text-gray-400"><Package className="w-16 h-16 mx-auto mb-4 opacity-20" /><p>No orders yet.</p></div> : <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide space-y-3">{orders.map(order => (<div key={order.id} className="bg-white dark:bg-gray-900 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
-                <div onClick={() => setSelectedOrder(order)} className="cursor-pointer active:scale-95 transition-transform">
-                    <div className="flex justify-between mb-2"><span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-wider ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : order.status === 'picked_up' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>{order.status.replace('_', ' ')}</span><span className="text-xs text-gray-400 font-mono">#{order.id.slice(0, 6)}</span></div>
-                    <div className="flex justify-between items-end"><div><p className="font-bold dark:text-white text-sm">{order.items.length} Items</p><p className="text-xs text-gray-500">{new Date(order.createdAt).toLocaleDateString()}</p></div><div className="text-right"><p className="font-black text-orange-500 text-lg">₦{order.total.toLocaleString()}</p><p className="text-[10px] text-gray-400 font-medium">Tap for details</p></div></div>
-                </div>
-                {/* 🟢 RETRY: Show Pay Now button for pending Paystack orders */}
-                {order.status === 'pending' && order.paymentMethod === 'paystack' && (
-                    <RetryPayButton order={order} />
-                )}
-            </div>))}</div>}
-        </ViewContainer>
-    );
+            return (
+            <ViewContainer title="My Orders" showBack onBack={() => setCurrentView('home')}>
+                {selectedOrder && <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} onRate={handleRateProduct} />}
+                {loading ? <div className="flex justify-center p-10"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div> : orders.length === 0 ? <div className="text-center mt-10 text-gray-400"><Package className="w-16 h-16 mx-auto mb-4 opacity-20" /><p>No orders yet.</p></div> : <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide space-y-3">{orders.map(order => (<div key={order.id} className="bg-white dark:bg-gray-900 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
+                    <div onClick={() => setSelectedOrder(order)} className="cursor-pointer active:scale-95 transition-transform">
+                        <div className="flex justify-between mb-2"><span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-wider ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : order.status === 'picked_up' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>{order.status.replace('_', ' ')}</span><span className="text-xs text-gray-400 font-mono">#{order.id.slice(0, 6)}</span></div>
+                        <div className="flex justify-between items-end"><div><p className="font-bold dark:text-white text-sm">{order.items.length} Items</p><p className="text-xs text-gray-500">{new Date(order.createdAt).toLocaleDateString()}</p></div><div className="text-right"><p className="font-black text-orange-500 text-lg">₦{order.total.toLocaleString()}</p><p className="text-[10px] text-gray-400 font-medium">Tap for details</p></div></div>
+                    </div>
+                    {/* 🟢 RETRY: Show Pay Now button for pending Paystack orders */}
+                    {order.status === 'pending' && order.paymentMethod === 'paystack' && (
+                        <RetryPayButton order={order} />
+                    )}
+                </div>))}</div>}
+            </ViewContainer>
+            );
 };
 
-// --- 7. WALLET VIEW ---
-export const WalletView = ({ setCurrentView, user, setGlobalWallet }) => {
+            // --- 7. WALLET VIEW ---
+            export const WalletView = ({setCurrentView, user, setGlobalWallet}) => {
     const [wallet, setWallet] = useState(null);
-    const [showPrivate, setShowPrivate] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState(null);
+            const [showPrivate, setShowPrivate] = useState(false);
+            const [isLoading, setIsLoading] = useState(false);
+            const [error, setError] = useState(null);
 
     useEffect(() => {
         try {
             const saved = localStorage.getItem(`eatai_wallet_${user.uid}`);
             if (saved) {
                 const parsed = JSON.parse(saved);
-                setWallet(parsed);
-                setGlobalWallet(parsed);
+            setWallet(parsed);
+            setGlobalWallet(parsed);
             }
-        } catch (e) { console.error("Wallet load error:", e); }
+        } catch (e) {console.error("Wallet load error:", e); }
     }, [user]);
 
     const createWallet = async () => {
-        setIsLoading(true);
-        setError(null);
-        try {
-            await new Promise(resolve => setTimeout(resolve, 100)); // UI Breath
+                setIsLoading(true);
+            setError(null);
+            try {
+                await new Promise(resolve => setTimeout(resolve, 100)); // UI Breath
             const w = ethers.Wallet.createRandom();
-            const wd = { address: w.address, privateKey: w.privateKey, mnemonic: w.mnemonic?.phrase };
+            const wd = {address: w.address, privateKey: w.privateKey, mnemonic: w.mnemonic?.phrase };
             localStorage.setItem(`eatai_wallet_${user.uid}`, JSON.stringify(wd));
             await saveWalletToProfile(user.uid, w.address);
             setWallet(wd);
             setGlobalWallet(wd);
         } catch (e) {
-            console.error(e);
+                console.error(e);
             setError("Could not create wallet. Try again.");
         } finally {
-            setIsLoading(false);
+                setIsLoading(false);
         }
     };
-    const copyToClipboard = (text) => { navigator.clipboard.writeText(text); alert("Copied!"); };
+    const copyToClipboard = (text) => {navigator.clipboard.writeText(text); alert("Copied!"); };
 
-    return (
-        <ViewContainer title="Crypto Kitchen" showBack onBack={() => setCurrentView('home')}>
-            <div className="flex flex-col items-center justify-center space-y-6 mt-10">
-                {!wallet ? (
-                    <>
-                        <div className="w-24 h-24 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center"><Wallet className="w-12 h-12 text-indigo-600" /></div>
-                        <p className="text-gray-500 dark:text-gray-400 text-center max-w-xs font-medium">Generate a secure wallet linked to {user.displayName}</p>
-                        {error && <p className="text-red-500 text-sm">{error}</p>}
-                        <button onClick={createWallet} disabled={isLoading} className="bg-indigo-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg flex items-center gap-2 hover:bg-indigo-700 transition-colors">{isLoading ? <Sparkles className="animate-spin" /> : <Plus />} Generate Wallet</button>
-                    </>
-                ) : (
-                    <div className="w-full space-y-4">
-                        <div className="bg-indigo-600 p-6 rounded-2xl text-white shadow-xl">
-                            <p className="text-xs opacity-70 mb-1">Your Address (Tap to Copy)</p>
-                            <code onClick={() => copyToClipboard(wallet.address)} className="text-sm break-all cursor-pointer hover:underline">{wallet.address}</code>
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-gray-500 dark:text-gray-400">Private Key (Keep Safe!)</label>
-                            <div className="relative">
-                                <div className={`p-3 bg-gray-100 dark:bg-gray-800 rounded-xl text-xs break-all text-gray-700 dark:text-gray-300 ${!showPrivate ? 'blur-sm' : ''}`}>{wallet.privateKey}</div>
-                                <button onClick={() => setShowPrivate(!showPrivate)} className="absolute top-2 right-2 text-gray-500 hover:text-indigo-600"><Eye className="w-4 h-4" /></button>
+            return (
+            <ViewContainer title="Crypto Kitchen" showBack onBack={() => setCurrentView('home')}>
+                <div className="flex flex-col items-center justify-center space-y-6 mt-10">
+                    {!wallet ? (
+                        <>
+                            <div className="w-24 h-24 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center"><Wallet className="w-12 h-12 text-indigo-600" /></div>
+                            <p className="text-gray-500 dark:text-gray-400 text-center max-w-xs font-medium">Generate a secure wallet linked to {user.displayName}</p>
+                            {error && <p className="text-red-500 text-sm">{error}</p>}
+                            <button onClick={createWallet} disabled={isLoading} className="bg-indigo-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg flex items-center gap-2 hover:bg-indigo-700 transition-colors">{isLoading ? <Sparkles className="animate-spin" /> : <Plus />} Generate Wallet</button>
+                        </>
+                    ) : (
+                        <div className="w-full space-y-4">
+                            <div className="bg-indigo-600 p-6 rounded-2xl text-white shadow-xl">
+                                <p className="text-xs opacity-70 mb-1">Your Address (Tap to Copy)</p>
+                                <code onClick={() => copyToClipboard(wallet.address)} className="text-sm break-all cursor-pointer hover:underline">{wallet.address}</code>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-gray-500 dark:text-gray-400">Private Key (Keep Safe!)</label>
+                                <div className="relative">
+                                    <div className={`p-3 bg-gray-100 dark:bg-gray-800 rounded-xl text-xs break-all text-gray-700 dark:text-gray-300 ${!showPrivate ? 'blur-sm' : ''}`}>{wallet.privateKey}</div>
+                                    <button onClick={() => setShowPrivate(!showPrivate)} className="absolute top-2 right-2 text-gray-500 hover:text-indigo-600"><Eye className="w-4 h-4" /></button>
+                                </div>
+                            </div>
+                            <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 text-xs rounded-xl border border-yellow-100 dark:border-yellow-800">
+                                ⚠️ <b>Warning:</b> This wallet is stored locally. If you clear your browser cache, it will be lost unless you save your Private Key.
                             </div>
                         </div>
-                        <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 text-xs rounded-xl border border-yellow-100 dark:border-yellow-800">
-                            ⚠️ <b>Warning:</b> This wallet is stored locally. If you clear your browser cache, it will be lost unless you save your Private Key.
-                        </div>
-                    </div>
-                )}
-            </div>
-        </ViewContainer>
-    );
+                    )}
+                </div>
+            </ViewContainer>
+            );
 };
 
-export const DeciderView = ({ ingredients, setIngredients, generateRecipes, isThinking, aiRecipe, setCurrentView, activeFilters, toggleFilter }) => (
-    <ViewContainer title="AI Fridge Raider" showBack onBack={() => setCurrentView('home')}>
-        <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide">
-            <div className="bg-orange-50 dark:bg-gray-800 p-6 rounded-3xl mb-6 border border-orange-100 dark:border-gray-700 transition-colors">
-                <div className="flex flex-wrap gap-2 mb-4"><DietaryFilter icon={Leaf} label="Vegan" active={activeFilters.includes('Vegan')} onClick={() => toggleFilter('Vegan')} /><DietaryFilter icon={Beef} label="High Protein" active={activeFilters.includes('High Protein')} onClick={() => toggleFilter('High Protein')} /><DietaryFilter icon={Zap} label="Keto" active={activeFilters.includes('Keto')} onClick={() => toggleFilter('Keto')} /><DietaryFilter icon={Cookie} label="Low Carb" active={activeFilters.includes('Low Carb')} onClick={() => toggleFilter('Low Carb')} /></div>
-                <label className="block text-orange-800 dark:text-orange-300 font-semibold mb-3">What's in your kitchen?</label>
-                <textarea autoFocus value={ingredients} onChange={(e) => setIngredients(e.target.value)} placeholder="e.g., 2 eggs, stale bread, milk..." className="w-full p-4 rounded-xl border-2 border-orange-200 dark:border-gray-600 focus:border-orange-500 dark:focus:border-orange-500 focus:ring-0 bg-white dark:bg-gray-700 dark:text-white h-32 resize-none transition-all placeholder-gray-400" />
-                <button onClick={generateRecipes} disabled={isThinking || !ingredients.trim()} className="w-full mt-4 bg-orange-500 hover:bg-orange-600 text-white font-bold py-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20">{isThinking ? <><Sparkles className="w-5 h-5 animate-spin" /><span>Thinking...</span></> : <><Sparkles className="w-5 h-5" /><span>Invent Recipe</span></>}</button>
-            </div>
-            {aiRecipe && <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-700 animate-slide-up whitespace-pre-wrap"><h3 className="text-xl font-bold text-orange-600 dark:text-orange-400 mb-4">Chef EatAi Suggests:</h3><div className="text-gray-700 dark:text-gray-300 leading-loose font-medium whitespace-pre-line">{aiRecipe}</div></div>}
-        </div>
-    </ViewContainer>
-);
+            export const DeciderView = ({ingredients, setIngredients, generateRecipes, isThinking, aiRecipe, setCurrentView, activeFilters, toggleFilter}) => (
+            <ViewContainer title="AI Fridge Raider" showBack onBack={() => setCurrentView('home')}>
+                <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide">
+                    <div className="bg-orange-50 dark:bg-gray-800 p-6 rounded-3xl mb-6 border border-orange-100 dark:border-gray-700 transition-colors">
+                        <div className="flex flex-wrap gap-2 mb-4"><DietaryFilter icon={Leaf} label="Vegan" active={activeFilters.includes('Vegan')} onClick={() => toggleFilter('Vegan')} /><DietaryFilter icon={Beef} label="High Protein" active={activeFilters.includes('High Protein')} onClick={() => toggleFilter('High Protein')} /><DietaryFilter icon={Zap} label="Keto" active={activeFilters.includes('Keto')} onClick={() => toggleFilter('Keto')} /><DietaryFilter icon={Cookie} label="Low Carb" active={activeFilters.includes('Low Carb')} onClick={() => toggleFilter('Low Carb')} /></div>
+                        <label className="block text-orange-800 dark:text-orange-300 font-semibold mb-3">What's in your kitchen?</label>
+                        <textarea autoFocus value={ingredients} onChange={(e) => setIngredients(e.target.value)} placeholder="e.g., 2 eggs, stale bread, milk..." className="w-full p-4 rounded-xl border-2 border-orange-200 dark:border-gray-600 focus:border-orange-500 dark:focus:border-orange-500 focus:ring-0 bg-white dark:bg-gray-700 dark:text-white h-32 resize-none transition-all placeholder-gray-400" />
+                        <button onClick={generateRecipes} disabled={isThinking || !ingredients.trim()} className="w-full mt-4 bg-orange-500 hover:bg-orange-600 text-white font-bold py-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20">{isThinking ? <><Sparkles className="w-5 h-5 animate-spin" /><span>Thinking...</span></> : <><Sparkles className="w-5 h-5" /><span>Invent Recipe</span></>}</button>
+                    </div>
+                    {aiRecipe && <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-700 animate-slide-up whitespace-pre-wrap"><h3 className="text-xl font-bold text-orange-600 dark:text-orange-400 mb-4">Chef EatAi Suggests:</h3><div className="text-gray-700 dark:text-gray-300 leading-loose font-medium whitespace-pre-line">{aiRecipe}</div></div>}
+                </div>
+            </ViewContainer>
+            );
 
-// --- 9. CHECKOUT MODALS (WITH PICKUP & ZONES) ---
-export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city }) => {
+            // --- 9. CHECKOUT MODALS (WITH AUTO DISTANCE PRICING) ---
+            export const PaymentModal = ({isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city, vendorMetadata, vendor}) => {
     if (!isOpen) return null;
-    const [processing, setProcessing] = useState(false);
-    const [paymentStage, setPaymentStage] = useState(null); // null | 'waiting' | 'confirmed' | 'closed'
-    const [orderType, setOrderType] = useState('delivery');
-    const [form, setForm] = useState({ transferName: '', address: '', phone: '', landmark: '', deliveryAreaName: '' });
-    const [activeMethod, setActiveMethod] = useState(paymentMethod || 'paystack');
+            const [processing, setProcessing] = useState(false);
+            const [paymentStage, setPaymentStage] = useState(null);
+            const [orderType, setOrderType] = useState('delivery');
+            const [form, setForm] = useState({transferName: '', address: '', phone: '', landmark: '', deliveryAreaName: '' });
+            const [activeMethod, setActiveMethod] = useState(paymentMethod || 'paystack');
 
-    // 🟢 Get Zones for Current City
-    const availableZones = DELIVERY_ZONES[city] || [];
+            // 🟢 GPS State
+            const [gpsState, setGpsState] = useState('idle'); // idle | loading | success | denied
+            const [customerCoords, setCustomerCoords] = useState(null); // {lat, lng}
+            const [autoFeeResult, setAutoFeeResult] = useState(null); // result from getAutoDeliveryFee
+            const [detectedAddress, setDetectedAddress] = useState(null); // human-readable address from Nominatim
+            const [vendorHasGPS, setVendorHasGPS] = useState(true); // false if vendor hasn't set their location
 
-    // GPS
-    const handleUseGPS = () => {
-        if (!navigator.geolocation) return alert("Geolocation not supported");
-        navigator.geolocation.getCurrentPosition(
-            (pos) => { alert("Location Found! (Backend logic needed)"); },
-            () => alert("Location permission denied.")
-        );
+            // 🟢 Address autocomplete state (used when GPS is denied or user prefers typing)
+            const [showAddressSearch, setShowAddressSearch] = useState(false);
+            const [addrQuery, setAddrQuery] = useState('');
+            const [addrSuggestions, setAddrSuggestions] = useState([]);
+            const [addrSearching, setAddrSearching] = useState(false);
+            const addrDebounceRef = useRef(null);
+
+    // 🟢 Reverse geocode coords using OpenStreetMap Nominatim (free, no API key)
+    const reverseGeocode = async (lat, lng) => {
+        try {
+            const resp = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
+            {headers: {'Accept-Language': 'en' } }
+            );
+            const data = await resp.json();
+            // Build a short readable address from the response
+            const a = data.address || { };
+            const parts = [
+            a.road || a.pedestrian || a.footway,
+            a.suburb || a.neighbourhood || a.quarter,
+            a.city || a.town || a.village || a.county,
+            ].filter(Boolean);
+            return parts.join(', ') || data.display_name?.split(',').slice(0, 3).join(',') || 'Location detected';
+        } catch {
+            return 'Location detected';
+        }
     };
+
+    // 🟢 Auto-calculate fee whenever customer coords are captured
+    useEffect(() => {
+        if (!customerCoords) return;
+            const meta = vendorMetadata?.[vendor];
+            if (meta?.lat && meta?.lng) {
+                setVendorHasGPS(true);
+            const result = getAutoDeliveryFee(meta.lat, meta.lng, customerCoords.lat, customerCoords.lng, cart);
+            setAutoFeeResult(result);
+        } else {
+                // Vendor has no GPS set — use base fee and warn
+                setVendorHasGPS(false);
+            setAutoFeeResult({fee: DEFAULT_PRICING.baseFee, distance: null, isAuto: false });
+        }
+    }, [customerCoords, vendor, vendorMetadata, cart]);
+
+    // 🟢 Address autocomplete: search Nominatim with debounce as user types
+    const handleAddrQueryChange = (val) => {
+                setAddrQuery(val);
+            setAddrSuggestions([]);
+            if (addrDebounceRef.current) clearTimeout(addrDebounceRef.current);
+            if (!val.trim() || val.length < 3) return;
+        addrDebounceRef.current = setTimeout(async () => {
+                setAddrSearching(true);
+            try {
+                const resp = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(val)}&limit=5&countrycodes=ng&addressdetails=1`,
+            {headers: {'Accept-Language': 'en' } }
+            );
+            const results = await resp.json();
+            setAddrSuggestions(results);
+            } catch {setAddrSuggestions([]); }
+            setAddrSearching(false);
+        }, 500);
+    };
+
+    // When user picks a suggestion from autocomplete
+    const handlePickAddressSuggestion = (result) => {
+        const lat = parseFloat(result.lat);
+            const lng = parseFloat(result.lon);
+            const label = result.display_name?.split(',').slice(0, 3).join(', ');
+            setCustomerCoords({lat, lng});
+            setDetectedAddress(label);
+            setGpsState('success');
+            setShowAddressSearch(false);
+            setAddrQuery('');
+            setAddrSuggestions([]);
+        setForm(prev => ({...prev, address: prev.address || label }));
+    };
+
+    // 🟢 GPS Capture + reverse geocode
+    const handleUseGPS = () => {
+        if (!navigator.geolocation) return alert("Geolocation not supported on this device.");
+            setGpsState('loading');
+            setShowAddressSearch(false);
+            navigator.geolocation.getCurrentPosition(
+            async (pos) => {
+                const {latitude: lat, longitude: lng } = pos.coords;
+            setCustomerCoords({lat, lng});
+            setGpsState('success');
+            // Reverse geocode in background
+            const addr = await reverseGeocode(lat, lng);
+            setDetectedAddress(addr);
+                // Auto-fill the address field if it's empty
+                setForm(prev => ({...prev, address: prev.address || addr }));
+            },
+            () => {
+                setGpsState('denied');
+            setShowAddressSearch(true); // auto-open address search on denial
+            },
+            {enableHighAccuracy: true, timeout: 10000 }
+            );
+    };
+
+            // 🟢 Delivery fee: auto distance if coords captured, else base fee
+            const deliveryFee = orderType === 'pickup' ? 0
+            : customerCoords ? (autoFeeResult?.fee ?? DEFAULT_PRICING.baseFee)
+            : DEFAULT_PRICING.baseFee;
+
+            const grandTotal = total + deliveryFee;
+
+    // Pre-generate unique order ID
+    const [orderId] = useState(() => `eatai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+
+            const initializePayment = usePaystackPayment({
+                reference: orderId,
+            email: user?.email,
+            amount: grandTotal * 100,
+            publicKey: PAYSTACK_KEY,
+    });
 
     useEffect(() => {
         if (user && isOpen) {
-            getUserProfile(user.uid).then(data => {
-                if (data) setForm(prev => ({ ...prev, address: data.address || '', phone: data.phone || '', landmark: data.landmark || '' }));
-            });
+                getUserProfile(user.uid).then(data => {
+                    if (data) setForm(prev => ({ ...prev, address: data.address || '', phone: data.phone || '', landmark: data.landmark || '' }));
+                });
         }
     }, [user, isOpen]);
 
-    // 🟢 Use zone name to get price
-    const deliveryFee = orderType === 'pickup' ? 0 : calculateDeliveryFee(city, form.deliveryAreaName);
-    const grandTotal = total + deliveryFee;
-
-    // 🟢 Pre-generate a unique Order ID that links Paystack payment → Firestore order
-    const [orderId] = useState(() => `eatai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
-
-    // Initialize Paystack hook WITH the orderId as reference
-    const initializePayment = usePaystackPayment({
-        reference: orderId,
-        email: user?.email,
-        amount: grandTotal * 100,
-        publicKey: PAYSTACK_KEY,
-    });
-
-    // 🟢 Listen for order confirmation via Firestore (webhook updates order)
     useEffect(() => {
         if (!paymentStage || paymentStage === 'confirmed') return;
         const unsubscribe = onSnapshot(doc(db, 'orders', orderId), (snapshot) => {
             if (snapshot.exists() && snapshot.data().status === 'confirmed') {
                 setPaymentStage('confirmed');
-                setTimeout(() => onSuccess(), 2000); // Show success briefly then close
+                setTimeout(() => onSuccess(), 2000);
             }
         });
         return () => unsubscribe();
     }, [paymentStage, orderId]);
 
     const handlePayment = async (method = activeMethod) => {
-        if (orderType === 'delivery' && (!form.address || !form.phone || !form.deliveryAreaName)) return alert("Please select a Delivery Area and enter address.");
+        if (orderType === 'delivery' && (!form.address || !form.phone)) return alert("Please enter your address and phone number.");
+            if (orderType === 'delivery' && !customerCoords && !form.deliveryAreaName) return alert("Please use GPS or select a delivery zone.");
 
-        setProcessing(true);
-        try {
+            setProcessing(true);
+            const customerLat = customerCoords?.lat || null;
+            const customerLng = customerCoords?.lng || null;
+
+            try {
             if (method === 'paystack') {
-                // 1. Create Order as PENDING first
                 await createOrder(
                     user.uid, cart, grandTotal, method,
                     globalWallet?.address, form.address, "Paystack Online",
                     form.phone, form.landmark, deliveryFee,
-                    'pending', orderType, '', orderId
+                    'pending', orderType, '', orderId, customerLat, customerLng
                 );
-                await saveUserProfile(user.uid, { address: form.address, phone: form.phone, landmark: form.landmark });
-
-                // 2. Show waiting state & open Paystack popup
-                setProcessing(false);
-                setPaymentStage('waiting');
-
-                initializePayment(
-                    (response) => {
-                        console.log('✅ Paystack payment complete:', response);
-                        // Webhook will confirm — onSnapshot listener handles the rest
-                    },
-                    () => {
-                        console.log('Paystack popup closed by user');
-                        setPaymentStage('closed');
-                    }
-                );
+            await saveUserProfile(user.uid, {address: form.address, phone: form.phone, landmark: form.landmark });
+            setProcessing(false);
+            setPaymentStage('waiting');
+            initializePayment(
+                    (response) => {console.log('✅ Paystack payment complete:', response); },
+                    () => {setPaymentStage('closed'); }
+            );
             } else {
-                // Crypto / Other Flow
                 await new Promise(r => setTimeout(r, 1500));
-                await createOrder(user.uid, cart, grandTotal, method, globalWallet?.address, form.address, "Paystack Online", form.phone, form.landmark, deliveryFee, 'pending', orderType);
-                await saveUserProfile(user.uid, { address: form.address, phone: form.phone, landmark: form.landmark });
-                setProcessing(false);
-                onSuccess();
+            await createOrder(user.uid, cart, grandTotal, method, globalWallet?.address, form.address, "Paystack Online", form.phone, form.landmark, deliveryFee, 'pending', orderType, '', null, customerLat, customerLng);
+            await saveUserProfile(user.uid, {address: form.address, phone: form.phone, landmark: form.landmark });
+            setProcessing(false);
+            onSuccess();
             }
         } catch (e) {
-            setProcessing(false);
+                setProcessing(false);
             alert("Error placing order: " + e.message);
         }
     };
 
-    return (
-        <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
-            <div className="bg-white dark:bg-gray-900 w-full max-w-lg p-6 rounded-t-3xl md:rounded-3xl shadow-2xl relative max-h-[90vh] overflow-y-auto">
-                <button onClick={onClose} className="absolute top-4 right-4 z-10"><X className="w-5 h-5" /></button>
+            return (
+            <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
+                <div className="bg-white dark:bg-gray-900 w-full max-w-lg p-6 rounded-t-3xl md:rounded-3xl shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                    <button onClick={onClose} className="absolute top-4 right-4 z-10"><X className="w-5 h-5" /></button>
 
-                {/* ===== PAYMENT STATUS OVERLAY ===== */}
-                {paymentStage && (
-                    <div className="absolute inset-0 z-20 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center p-8 text-center">
-                        {paymentStage === 'waiting' && (
-                            <>
-                                <div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                                <h3 className="text-xl font-black dark:text-white mb-2">Completing Payment...</h3>
-                                <p className="text-sm text-gray-500 mb-1">Complete the payment in the Paystack window.</p>
-                                <p className="text-xs text-gray-400 mb-6">This screen updates automatically once confirmed.</p>
-                                <button onClick={() => setPaymentStage('closed')} className="text-xs text-gray-400 underline hover:text-orange-500 transition-colors">I'll pay later</button>
-                            </>
-                        )}
-                        {paymentStage === 'confirmed' && (
-                            <>
-                                <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-4">
-                                    <CheckCircle className="w-10 h-10 text-green-600" />
-                                </div>
-                                <h3 className="text-xl font-black text-green-700 mb-2">Payment Confirmed! ✅</h3>
-                                <p className="text-sm text-gray-500">Your order is on its way. Redirecting...</p>
-                            </>
-                        )}
-                        {paymentStage === 'closed' && (
-                            <>
-                                <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
-                                    <AlertTriangle className="w-10 h-10 text-yellow-600" />
-                                </div>
-                                <h3 className="text-lg font-black dark:text-white mb-2">Payment Not Completed</h3>
-                                <p className="text-sm text-gray-500 mb-4">You closed the payment window. Your order is saved as pending — you can pay anytime from <b>My Orders</b>.</p>
-                                <div className="space-y-2 w-full max-w-xs">
-                                    <button onClick={() => { setPaymentStage('waiting'); initializePayment((r) => console.log('✅ Retry:', r), () => setPaymentStage('closed')); }} className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold shadow hover:bg-orange-600 transition-colors">Try Again</button>
-                                    <button onClick={onClose} className="w-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors">Go to My Orders</button>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                )}
-
-                <h3 className="text-xl font-bold text-center mb-4 dark:text-white">Complete Order</h3>
-
-                {/* TOGGLE: Delivery / Pickup */}
-                {/* <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl mb-4">
-                    <button onClick={() => setOrderType('delivery')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${orderType === 'delivery' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>Delivery</button>
-                    <button onClick={() => setOrderType('pickup')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${orderType === 'pickup' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>Pickup</button>
-                </div> */}
-
-                <div className="space-y-3">
-                    {orderType === 'delivery' && (
-                        <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
-                            <div>
-                                <div className="flex justify-between items-center mb-1">
-                                    <label className="text-xs font-bold text-gray-500">Delivery Zone</label>
-                                    <button onClick={handleUseGPS} className="text-xs text-orange-500 font-bold flex items-center gap-1"><Navigation className="w-3 h-3" /> Use GPS</button>
-                                </div>
-                                {/* 🟢 NEW: ZONE DROPDOWN */}
-                                <select
-                                    className="w-full bg-white dark:bg-gray-700 p-2 rounded border dark:border-gray-600 dark:text-white mt-1"
-                                    value={form.deliveryAreaName}
-                                    onChange={e => setForm({ ...form, deliveryAreaName: e.target.value })}
-                                >
-                                    <option value="">Select Area...</option>
-                                    {availableZones.map((zone, i) => <option key={i} value={zone.name}>{zone.name} - ₦{zone.price}</option>)}
-                                </select>
-                                {form.deliveryAreaName && <p className="text-xs text-orange-500 mt-1">Fee: ₦{deliveryFee}</p>}
-                            </div>
-                            <div><label className="text-xs font-bold text-gray-500">Address</label><input className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Street" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></div>
+                    {/* ===== PAYMENT STATUS OVERLAY ===== */}
+                    {paymentStage && (
+                        <div className="absolute inset-0 z-20 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center p-8 text-center">
+                            {paymentStage === 'waiting' && (
+                                <>
+                                    <div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                                    <h3 className="text-xl font-black dark:text-white mb-2">Completing Payment...</h3>
+                                    <p className="text-sm text-gray-500 mb-1">Complete the payment in the Paystack window.</p>
+                                    <p className="text-xs text-gray-400 mb-6">This screen updates automatically once confirmed.</p>
+                                    <button onClick={() => setPaymentStage('closed')} className="text-xs text-gray-400 underline hover:text-orange-500 transition-colors">I'll pay later</button>
+                                </>
+                            )}
+                            {paymentStage === 'confirmed' && (
+                                <>
+                                    <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-4">
+                                        <CheckCircle className="w-10 h-10 text-green-600" />
+                                    </div>
+                                    <h3 className="text-xl font-black text-green-700 mb-2">Payment Confirmed! ✅</h3>
+                                    <p className="text-sm text-gray-500">Your order is on its way. Redirecting...</p>
+                                </>
+                            )}
+                            {paymentStage === 'closed' && (
+                                <>
+                                    <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
+                                        <AlertTriangle className="w-10 h-10 text-yellow-600" />
+                                    </div>
+                                    <h3 className="text-lg font-black dark:text-white mb-2">Payment Not Completed</h3>
+                                    <p className="text-sm text-gray-500 mb-4">You closed the payment window. Your order is saved as pending — you can pay anytime from <b>My Orders</b>.</p>
+                                    <div className="space-y-2 w-full max-w-xs">
+                                        <button onClick={() => { setPaymentStage('waiting'); initializePayment((r) => console.log('✅ Retry:', r), () => setPaymentStage('closed')); }} className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold shadow hover:bg-orange-600 transition-colors">Try Again</button>
+                                        <button onClick={onClose} className="w-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors">Go to My Orders</button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     )}
-                    <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
-                        <div className="flex gap-2"><div className="flex-1"><label className="text-xs font-bold text-gray-500">Phone</label><input type="tel" className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="080..." value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div></div>
-                    </div>
-                </div>
 
-                {/* 🟢 ORDER SUMMARY (ITEMS LIST WITH ADDONS) */}
-                <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
-                    <p className="text-[10px] text-gray-400 font-bold uppercase mb-2">Order Summary</p>
-                    <div className="space-y-2 max-h-40 overflow-y-auto scrollbar-hide">
-                        {cart.map((item, i) => {
-                            const addonsTotal = item.selectedAddons ? item.selectedAddons.reduce((s, a) => s + (a.price || 0), 0) : 0;
-                            return (
-                                <div key={i} className="flex justify-between items-start text-sm border-b border-gray-200 dark:border-gray-700 last:border-0 pb-2 last:pb-0">
-                                    <div className="flex gap-2 items-start">
-                                        <div className="flex-shrink-0 w-10 h-10 bg-white dark:bg-gray-700 rounded-lg flex items-center justify-center text-lg overflow-hidden">
-                                            {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" /> : item.image}
-                                        </div>
-                                        <div>
-                                            <p className="font-bold text-gray-800 dark:text-white text-xs">{item.name}</p>
-                                            {item.selectedAddons && item.selectedAddons.length > 0 && (
-                                                <p className="text-[10px] text-orange-500 font-bold">+ {item.selectedAddons.map(a => `${a.name} (₦${a.price})`).join(', ')}</p>
+                    <h3 className="text-xl font-bold text-center mb-4 dark:text-white">Complete Order</h3>
+
+                    <div className="space-y-3">
+                        {orderType === 'delivery' && (
+                            <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
+
+                                {/* 🟢 GPS SECTION */}
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-xs font-bold text-gray-500">Delivery Location</label>
+                                        {gpsState !== 'success' && (
+                                            <button
+                                                onClick={handleUseGPS}
+                                                disabled={gpsState === 'loading'}
+                                                className="text-xs text-orange-500 font-bold flex items-center gap-1 disabled:opacity-50"
+                                            >
+                                                <Navigation className="w-3 h-3" />
+                                                {gpsState === 'loading' ? 'Getting location...' : 'Use My GPS'}
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {/* GPS SUCCESS: show auto fee */}
+                                    {gpsState === 'success' && autoFeeResult && (
+                                        <div className="space-y-2">
+                                            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-3">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                                                    <span className="text-xs font-bold text-green-700 dark:text-green-400">Your Location Detected</span>
+                                                    <button onClick={() => { setGpsState('idle'); setCustomerCoords(null); setAutoFeeResult(null); setDetectedAddress(null); }} className="ml-auto text-xs text-gray-400 underline">Change</button>
+                                                </div>
+                                                {detectedAddress && (
+                                                    <p className="text-xs text-gray-600 dark:text-gray-300 font-medium pl-6">{detectedAddress}</p>
+                                                )}
+                                                {autoFeeResult.distance !== null && (
+                                                    <p className="text-xs text-gray-400 pl-6 mt-0.5">~{autoFeeResult.distance} km from vendor</p>
+                                                )}
+                                            </div>
+                                            {/* Vendor GPS missing warning */}
+                                            {!vendorHasGPS && (
+                                                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-700 dark:text-yellow-400">
+                                                    ⚠️ <b>Flat rate applied.</b> The vendor hasn't set their pickup location yet, so we can't calculate the exact distance. Delivery fee: <b>₦{deliveryFee.toLocaleString()}</b>
+                                                </div>
+                                            )}
+                                            {vendorHasGPS && (
+                                                <p className="text-sm font-black text-orange-500 px-1">Delivery Fee: ₦{deliveryFee.toLocaleString()}
+                                                    {autoFeeResult.isMultiVendor && <span className="text-[10px] text-gray-400 font-normal ml-1">(+₦350 multi-vendor)</span>}
+                                                </p>
                                             )}
                                         </div>
-                                    </div>
-                                    <span className="font-bold text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">₦{(item.price + addonsTotal).toLocaleString()}</span>
+                                    )}
+
+                                    {/* GPS DENIED or user wants to type: address autocomplete */}
+                                    {(gpsState === 'denied' || showAddressSearch) && gpsState !== 'success' && (
+                                        <div className="space-y-2">
+                                            {gpsState === 'denied' && <p className="text-xs text-red-500 font-medium">GPS was denied — type your area or landmark below:</p>}
+                                            <div className="relative">
+                                                <input
+                                                    type="text"
+                                                    placeholder="Type street, area or landmark..."
+                                                    value={addrQuery}
+                                                    onChange={e => handleAddrQueryChange(e.target.value)}
+                                                    className="w-full p-2 pr-8 rounded-xl border dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                                                    autoFocus
+                                                />
+                                                {addrSearching && <span className="absolute right-2 top-2 text-xs text-orange-400">⏳</span>}
+                                            </div>
+                                            {addrSuggestions.length > 0 && (
+                                                <div className="bg-white dark:bg-gray-700 rounded-xl border dark:border-gray-600 overflow-hidden shadow-lg">
+                                                    {addrSuggestions.map((r, i) => (
+                                                        <button
+                                                            key={i}
+                                                            onClick={() => handlePickAddressSuggestion(r)}
+                                                            className="w-full text-left px-3 py-2 text-xs hover:bg-orange-50 dark:hover:bg-gray-600 border-b dark:border-gray-600 last:border-0 transition-colors"
+                                                        >
+                                                            <span className="font-bold text-orange-500">📍 </span>
+                                                            {r.display_name?.split(',').slice(0, 4).join(', ')}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {addrQuery.length >= 3 && !addrSearching && addrSuggestions.length === 0 && (
+                                                <p className="text-xs text-gray-400">No suggestions. Try a nearby landmark or area name.</p>
+                                            )}
+                                            {gpsState === 'denied' && (
+                                                <button onClick={handleUseGPS} className="text-xs text-orange-500 underline">Try GPS again</button>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* IDLE: prompt GPS + option to type */}
+                                    {gpsState === 'idle' && !showAddressSearch && (
+                                        <div className="space-y-2">
+                                            <button
+                                                onClick={handleUseGPS}
+                                                className="w-full border-2 border-dashed border-orange-300 rounded-xl p-3 flex items-center justify-center gap-2 text-orange-500 hover:bg-orange-50 transition-colors"
+                                            >
+                                                <Navigation className="w-4 h-4" />
+                                                <span className="text-sm font-bold">Tap to detect my location (GPS)</span>
+                                            </button>
+                                            <button
+                                                onClick={() => setShowAddressSearch(true)}
+                                                className="w-full text-xs text-gray-400 hover:text-gray-600 text-center py-1"
+                                            >
+                                                ✏️ Or type my address instead
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
-                            );
-                        })}
+
+                                <div><label className="text-xs font-bold text-gray-500">Street Address</label><input className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="e.g. 12 Market Road" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></div>
+                            </div>
+                        )}
+                        <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
+                            <div className="flex gap-2"><div className="flex-1"><label className="text-xs font-bold text-gray-500">Phone</label><input type="tel" className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="080..." value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div></div>
+                        </div>
                     </div>
+
+                    {/* ORDER SUMMARY */}
+                    <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
+                        <p className="text-[10px] text-gray-400 font-bold uppercase mb-2">Order Summary</p>
+                        <div className="space-y-2 max-h-40 overflow-y-auto scrollbar-hide">
+                            {cart.map((item, i) => {
+                                const addonsTotal = item.selectedAddons ? item.selectedAddons.reduce((s, a) => s + (a.price || 0), 0) : 0;
+                                return (
+                                    <div key={i} className="flex justify-between items-start text-sm border-b border-gray-200 dark:border-gray-700 last:border-0 pb-2 last:pb-0">
+                                        <div className="flex gap-2 items-start">
+                                            <div className="flex-shrink-0 w-10 h-10 bg-white dark:bg-gray-700 rounded-lg flex items-center justify-center text-lg overflow-hidden">
+                                                {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" /> : item.image}
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-gray-800 dark:text-white text-xs">{item.name}</p>
+                                                {item.selectedAddons && item.selectedAddons.length > 0 && (
+                                                    <p className="text-[10px] text-orange-500 font-bold">+ {item.selectedAddons.map(a => `${a.name} (₦${a.price})`).join(', ')}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <span className="font-bold text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">₦{(item.price + addonsTotal).toLocaleString()}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="flex justify-between items-center mt-6 pt-4 border-t dark:border-gray-700"><div className="text-sm text-gray-500">Total:</div><div className="text-2xl font-black text-green-600">₦{grandTotal.toLocaleString()}</div></div>
+
+                    <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-1.5 rounded-xl flex gap-1">
+                        <button onClick={() => setActiveMethod('paystack')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'paystack' ? 'bg-white dark:bg-gray-700 shadow text-green-600 dark:text-white' : 'text-gray-400'}`}>
+                            <div className="flex items-center justify-center gap-2"><CreditCard className="w-4 h-4" /> Paystack</div>
+                        </button>
+                    </div>
+
+                    {activeMethod === 'paystack' ? (
+                        (orderType === 'delivery' && (!form.address || (!customerCoords && !form.deliveryAreaName))) ?
+                            <button disabled className="w-full mt-4 bg-gray-300 dark:bg-gray-700 text-white font-bold py-4 rounded-xl cursor-not-allowed">Enter Delivery Details</button> :
+                            <button onClick={() => handlePayment('paystack')} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Pay Now'}</button>
+                    ) : (<button onClick={() => handlePayment('crypto')} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Confirm Crypto Transfer'}</button>)}
                 </div>
-
-                <div className="flex justify-between items-center mt-6 pt-4 border-t dark:border-gray-700"><div className="text-sm text-gray-500">Total:</div><div className="text-2xl font-black text-green-600">₦{grandTotal.toLocaleString()}</div></div>
-
-                <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-1.5 rounded-xl flex gap-1">
-                    <button onClick={() => setActiveMethod('paystack')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'paystack' ? 'bg-white dark:bg-gray-700 shadow text-green-600 dark:text-white' : 'text-gray-400'}`}>
-                        <div className="flex items-center justify-center gap-2"><CreditCard className="w-4 h-4" /> Paystack</div>
-                    </button>
-                    {/* <button onClick={() => setActiveMethod('crypto')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'crypto' ? 'bg-indigo-500 text-white shadow' : 'text-gray-400'}`}>
-                        <div className="flex items-center justify-center gap-2"><Wallet className="w-4 h-4" /> Crypto</div>
-                    </button> */}
-                </div>
-
-                {activeMethod === 'paystack' ? (
-                    (orderType === 'delivery' && (!form.address || !form.deliveryAreaName)) ?
-                        <button disabled className="w-full mt-4 bg-gray-300 dark:bg-gray-700 text-white font-bold py-4 rounded-xl cursor-not-allowed">Enter Delivery Details</button> :
-                        <button onClick={() => handlePayment('paystack')} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Pay Now'}</button>
-                ) : (<button onClick={() => handlePayment('crypto')} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Confirm Crypto Transfer'}</button>)}
             </div>
-        </div>
-    );
+            );
 };
 
-export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeFromCart, cartTotal, globalWallet, user, setCart, city }) => {
+// Helper: check if a vendor is currently open based on their openTime/closeTime in vendorMetadata
+// openTime and closeTime are "HH:MM" strings in 24h format, e.g. "08:00" / "21:00"
+const isVendorOpen = (vendorName, vendorMetadata) => {
+    if (!vendorMetadata || !vendorMetadata[vendorName]) return true; // assume open if no data
+    const meta = vendorMetadata[vendorName];
+    if (!meta.openTime || !meta.closeTime) return true; // assume open if hours not configured
+    const now = new Date();
+    const [openH, openM] = meta.openTime.split(':').map(Number);
+    const [closeH, closeM] = meta.closeTime.split(':').map(Number);
+    const open = openH * 60 + openM;
+    const close = closeH * 60 + closeM;
+    const current = now.getHours() * 60 + now.getMinutes();
+    // Handle overnight vendors (e.g. open 20:00 close 02:00)
+    if (close < open) return current >= open || current < close;
+    return current >= open && current < close;
+};
+
+export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeFromCart, cartTotal, globalWallet, user, setCart, city, vendorMetadata, vendor }) => {
     const [paymentMethod, setPaymentMethod] = useState('paystack');
     const [showModal, setShowModal] = useState(false);
+
+    // Check if every vendor in the cart is currently open
+    const closedVendors = [...new Set(cart.map(item => item.vendor).filter(Boolean))]
+        .filter(v => !isVendorOpen(v, vendorMetadata));
+    const hasClosedVendor = closedVendors.length > 0;
+
     return (
         <>
-            <PaymentModal isOpen={showModal} onClose={() => setShowModal(false)} total={cartTotal} paymentMethod={paymentMethod} user={user} cart={cart} globalWallet={globalWallet} onSuccess={() => { setShowModal(false); setCart([]); setCurrentView('orders'); alert("Order Placed!"); }} city={city} />
+            <PaymentModal isOpen={showModal} onClose={() => setShowModal(false)} total={cartTotal} paymentMethod={paymentMethod} user={user} cart={cart} globalWallet={globalWallet} onSuccess={() => { setShowModal(false); setCart([]); setCurrentView('orders'); alert("Order Placed!"); }} city={city} vendorMetadata={vendorMetadata} vendor={vendor} />
             <div className="fixed inset-0 z-50 flex justify-end pointer-events-none">
                 <div className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${currentView === 'cart' ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`} onClick={() => setCurrentView(marketSection ? 'market' : 'home')} />
                 <div className={`relative bg-white dark:bg-gray-900 shadow-2xl w-full max-w-md h-full flex flex-col pointer-events-auto transition-transform duration-300 transform ${currentView === 'cart' ? 'translate-x-0' : 'translate-x-full'}`}>
@@ -879,11 +1134,34 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
                         {cart.length > 0 && (
                             <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-xl flex">
                                 <button onClick={() => setPaymentMethod('paystack')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${paymentMethod === 'paystack' ? 'bg-white shadow dark:bg-gray-700 dark:text-white' : 'text-gray-500'}`}><CreditCard className="w-4 h-4" /> Paystack</button>
-                                {/* <button onClick={() => setPaymentMethod('crypto')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${paymentMethod === 'crypto' ? 'bg-indigo-500 text-white shadow' : 'text-gray-500'}`}><Wallet className="w-4 h-4" /> Crypto</button> */}
                             </div>
                         )}
                         <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="text-2xl font-black dark:text-white">₦{cartTotal.toLocaleString()}</span></div>
-                        <button onClick={() => setShowModal(true)} disabled={cart.length === 0} className="w-full bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">Checkout</button>
+
+                        {/* 🔴 CLOSED VENDOR BLOCKER */}
+                        {hasClosedVendor && (
+                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-3 text-center">
+                                <p className="text-red-600 dark:text-red-400 font-black text-sm">🔴 Vendor Closed</p>
+                                <p className="text-red-500 text-xs mt-1">
+                                    <b>{closedVendors.join(', ')}</b> {closedVendors.length > 1 ? 'are' : 'is'} currently closed.
+                                    {vendorMetadata?.[closedVendors[0]]?.openTime && (
+                                        <> Opens at <b>{vendorMetadata[closedVendors[0]].openTime}</b>.</>  
+                                    )}
+                                </p>
+                            </div>
+                        )}
+
+                        <button
+                            onClick={() => setShowModal(true)}
+                            disabled={cart.length === 0 || hasClosedVendor}
+                            className={`w-full font-bold py-4 rounded-xl shadow-lg transition-colors ${
+                                hasClosedVendor
+                                    ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+                                    : 'bg-green-600 hover:bg-green-700 text-white'
+                            }`}
+                        >
+                            {hasClosedVendor ? '🔴 Cannot Checkout — Vendor Closed' : 'Checkout'}
+                        </button>
                     </div>
                 </div>
             </div>

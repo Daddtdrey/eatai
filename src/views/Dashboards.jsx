@@ -12,7 +12,8 @@ import {
     db, collection, query, where, orderBy, limit, onSnapshot,
     updateOrderStatus, deleteOrder, addProduct, updateProduct, deleteProduct,
     uploadImage, saveVendorLogo, getAdminRole, requestNotificationPermission,
-    getBanners, saveBanner, deleteBanner, getTodayVisitors
+    getBanners, saveBanner, deleteBanner, getTodayVisitors, saveVendorLocation,
+    getVendorsWithLocation
 } from '../firebase.js';
 import { SUPER_ADMINS, SUB_ADMINS, LOCATIONS, VENDORS_BY_LOCATION } from '../config.js';
 
@@ -104,12 +105,25 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
                             <div className="mb-3 bg-gray-50 dark:bg-gray-900/30 p-3 rounded-lg border border-gray-100 dark:border-gray-700">
                                 <p className="text-xs text-gray-500 font-bold mb-2 uppercase">Order Contents:</p>
                                 {groupItems(task.items).map((item, idx) => (
-                                    <div key={idx} className="flex justify-between text-sm mb-1 border-b border-gray-200 dark:border-gray-700 last:border-0 pb-1 last:pb-0">
-                                        <span className="font-medium text-gray-800 dark:text-gray-200">
-                                            {item.quantity > 1 && <span className="font-bold text-orange-600 mr-1">{item.quantity}x</span>}
-                                            {item.name}
-                                        </span>
-                                        <span className="text-xs text-gray-500 bg-gray-200 dark:bg-gray-700 px-1 rounded">{item.vendor}</span>
+                                    <div key={idx} className="text-sm mb-2 border-b border-gray-200 dark:border-gray-700 last:border-0 pb-2 last:pb-0">
+                                        <div className="flex justify-between">
+                                            <span className="font-medium text-gray-800 dark:text-gray-200">
+                                                {item.quantity > 1 && <span className="font-bold text-orange-600 mr-1">{item.quantity}x</span>}
+                                                {item.name}
+                                            </span>
+                                            <span className="text-xs text-gray-500 bg-gray-200 dark:bg-gray-700 px-1 rounded">{item.vendor}</span>
+                                        </div>
+                                        {item.selectedAddons && item.selectedAddons.length > 0 && (
+                                            <p className="text-[11px] text-orange-500 font-bold mt-0.5 pl-1">
+                                                + {item.selectedAddons.map(a => a.name).join(', ')}
+                                            </p>
+                                        )}
+                                        {item.selectedSide && (
+                                            <p className="text-[11px] text-orange-500 font-bold mt-0.5 pl-1">+ {item.selectedSide}</p>
+                                        )}
+                                        {item.note && (
+                                            <p className="text-[11px] text-red-500 font-bold italic mt-0.5 pl-1">📝 {item.note}</p>
+                                        )}
                                     </div>
                                 ))}
                             </div>
@@ -128,14 +142,18 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
                                     <Phone className="w-4 h-4 text-blue-500" />
                                     <a href={`tel:${task.phone}`} className="font-mono text-blue-600 dark:text-blue-400 font-bold">{task.phone}</a>
                                 </div>
-                                {/* 🟢 MAP BUTTON */}
+                                {/* 🟢 MAP BUTTON — uses GPS coords when available for maximum accuracy */}
                                 <a
-                                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.deliveryAddress + " " + (task.landmark || ""))}`}
+                                    href={
+                                        task.customerLat && task.customerLng
+                                            ? `https://www.google.com/maps/dir/?api=1&destination=${task.customerLat},${task.customerLng}`
+                                            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.deliveryAddress + " " + (task.landmark || ""))}`
+                                    }
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="block text-center bg-blue-600 text-white py-2 rounded-lg font-bold text-xs mt-2 hover:bg-blue-700"
                                 >
-                                    🗺️ Open in Google Maps
+                                    🗺️ {task.customerLat ? 'Navigate to Customer' : 'Open in Google Maps'}
                                 </a>
                             </div>
 
@@ -194,6 +212,55 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
         getBanners().then(setBanners);
         getTodayVisitors().then(setTodaysVisitors);
     }, []);
+
+    // 🟢 Vendor Locations State (super admin)
+    const [vendorsWithLocation, setVendorsWithLocation] = useState([]);
+    const [locSearchQuery, setLocSearchQuery] = useState({});
+    const [locSearchResults, setLocSearchResults] = useState({});
+    const [locManualInput, setLocManualInput] = useState({}); // { vendorId: { lat, lng } }
+    const [locSaving, setLocSaving] = useState({});
+
+    useEffect(() => {
+        if (activeTab === 'locations') {
+            getVendorsWithLocation().then(setVendorsWithLocation);
+        }
+    }, [activeTab]);
+
+    const [locSearchLoading, setLocSearchLoading] = useState({});
+
+    const handleAddressSearch = async (vendorId) => {
+        const q = locSearchQuery[vendorId] || '';
+        if (!q.trim()) return;
+        setLocSearchLoading(prev => ({ ...prev, [vendorId]: true }));
+        setLocSearchResults(prev => ({ ...prev, [vendorId]: null })); // null = searching
+        try {
+            const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=5&countrycodes=ng&addressdetails=1`;
+            const resp = await fetch(url, {
+                headers: {
+                    'Accept-Language': 'en',
+                    'User-Agent': 'EatAi-Admin/1.0'
+                }
+            });
+            const results = await resp.json();
+            setLocSearchResults(prev => ({ ...prev, [vendorId]: results }));
+        } catch (err) {
+            setLocSearchResults(prev => ({ ...prev, [vendorId]: [] }));
+            alert('Address search failed. Try entering coordinates manually.');
+        } finally {
+            setLocSearchLoading(prev => ({ ...prev, [vendorId]: false }));
+        }
+    };
+
+    const handleSaveVendorLoc = async (vendorId, lat, lng) => {
+        setLocSaving(prev => ({ ...prev, [vendorId]: true }));
+        const ok = await saveVendorLocation(vendorId, parseFloat(lat), parseFloat(lng));
+        if (ok) {
+            setVendorsWithLocation(prev => prev.map(v => v.id === vendorId ? { ...v, lat: parseFloat(lat), lng: parseFloat(lng) } : v));
+            setLocSearchResults(prev => ({ ...prev, [vendorId]: [] }));
+            setLocManualInput(prev => ({ ...prev, [vendorId]: { lat: '', lng: '' } }));
+        } else { alert('Failed to save location.'); }
+        setLocSaving(prev => ({ ...prev, [vendorId]: false }));
+    };
 
     // 🟢 FLATTEN VENDORS: Convert { "Irrua": ["Nasco"] } -> ["Nasco"]
     const allVendorsList = useMemo(() => {
@@ -378,17 +445,158 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                 )}
             </div>
 
-            <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl shrink-0">
+
+
+
+            <div className="flex gap-2 mb-6 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl shrink-0 flex-wrap">
                 <button onClick={() => setActiveTab('orders')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'orders' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><PackageIcon className="w-4 h-4" /> Orders</button>
                 <button onClick={() => setActiveTab('products')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'products' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><Box className="w-4 h-4" /> Inventory</button>
                 <button onClick={() => setActiveTab('analytics')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'analytics' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><BarChart3 className="w-4 h-4" /> Stats</button>
                 {isSuperAdmin && <button onClick={() => setActiveTab('banners')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'banners' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><ImageIcon className="w-4 h-4" /> Banners</button>}
+                {isSuperAdmin && <button onClick={() => setActiveTab('locations')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'locations' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><MapPin className="w-4 h-4" /> Locations</button>}
             </div>
 
             <div className="flex-1 overflow-y-auto pb-32 scrollbar-hide min-h-0">
 
                 {activeTab === 'analytics' && (
                     <AnalyticsDashboard orders={adminOrders} role={role} myVendorName={myVendorName} />
+                )}
+
+                {/* 🟢 LOCATIONS TAB (Super Admin Only) */}
+                {activeTab === 'locations' && isSuperAdmin && (
+                    <div className="space-y-3">
+                        <div className="flex justify-between items-center mb-2">
+                            <h2 className="text-xl font-bold dark:text-white">Vendor Locations</h2>
+                            <button onClick={() => getVendorsWithLocation().then(setVendorsWithLocation)} className="text-xs text-orange-500 font-bold flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Refresh</button>
+                        </div>
+                        <p className="text-xs text-gray-400 mb-3">Set each vendor's GPS coordinates so customers get accurate delivery fees. Search an address OR enter lat/lng manually.</p>
+
+                        {vendorsWithLocation.length === 0 && (
+                            <div className="text-center text-gray-400 py-10"><MapPin className="w-10 h-10 mx-auto mb-2 opacity-30" /><p className="text-sm">No vendors found</p></div>
+                        )}
+
+                        {vendorsWithLocation.map(v => (
+                            <div key={v.id} className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
+                                {/* Header */}
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <p className="font-bold text-gray-800 dark:text-white">{v.name || v.id}</p>
+                                        {v.lat && v.lng ? (
+                                            <p className="text-xs text-green-600 font-medium mt-0.5">✅ Location set: {parseFloat(v.lat).toFixed(5)}, {parseFloat(v.lng).toFixed(5)}</p>
+                                        ) : (
+                                            <p className="text-xs text-red-400 font-medium mt-0.5">⚠️ No location set</p>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Address Search */}
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Search Address</label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            placeholder="e.g. Nasco, Ekpoma, Edo State"
+                                            value={locSearchQuery[v.id] || ''}
+                                            onChange={e => setLocSearchQuery(prev => ({ ...prev, [v.id]: e.target.value }))}
+                                            onKeyDown={e => e.key === 'Enter' && handleAddressSearch(v.id)}
+                                            className="flex-1 p-2 text-sm rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                        />
+                                        <button onClick={() => handleAddressSearch(v.id)} className="bg-orange-500 text-white px-3 rounded-lg text-xs font-bold">Search</button>
+                                    </div>
+                                    {/* Search Results */}
+                                    {locSearchLoading[v.id] && (
+                                        <p className="text-xs text-orange-500 mt-2 animate-pulse">Searching...</p>
+                                    )}
+                                    {!locSearchLoading[v.id] && locSearchResults[v.id] !== undefined && locSearchResults[v.id] !== null && locSearchResults[v.id].length === 0 && (
+                                        <p className="text-xs text-red-400 mt-2">No results found. Try more specific terms like <b>"Ekpoma, Edo State"</b> or use manual coordinates below.</p>
+                                    )}
+                                    {!locSearchLoading[v.id] && (locSearchResults[v.id] || []).length > 0 && (
+                                        <div className="mt-2 space-y-1">
+                                            {locSearchResults[v.id].map((result, i) => (
+                                                <button
+                                                    key={i}
+                                                    onClick={() => handleSaveVendorLoc(v.id, result.lat, result.lon)}
+                                                    className="w-full text-left p-2 bg-gray-50 dark:bg-gray-700 rounded-lg text-xs hover:bg-orange-50 dark:hover:bg-gray-600 transition-colors border border-transparent hover:border-orange-300"
+                                                >
+                                                    <span className="font-bold text-orange-600">{parseFloat(result.lat).toFixed(5)}, {parseFloat(result.lon).toFixed(5)}</span>{' '}
+                                                    <span className="text-gray-500">{result.display_name?.split(',').slice(0, 3).join(',')}</span>
+                                                    <span className="ml-2 text-green-600 font-bold">→ Use this</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Manual Lat/Lng */}
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Or Enter Coordinates Manually</label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="number" step="0.00001" placeholder="Latitude (e.g. 6.7356)"
+                                            value={locManualInput[v.id]?.lat || ''}
+                                            onChange={e => setLocManualInput(prev => ({ ...prev, [v.id]: { ...prev[v.id], lat: e.target.value } }))}
+                                            className="flex-1 p-2 text-sm rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                        />
+                                        <input
+                                            type="number" step="0.00001" placeholder="Longitude (e.g. 6.1298)"
+                                            value={locManualInput[v.id]?.lng || ''}
+                                            onChange={e => setLocManualInput(prev => ({ ...prev, [v.id]: { ...prev[v.id], lng: e.target.value } }))}
+                                            className="flex-1 p-2 text-sm rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                        />
+                                        <button
+                                            disabled={!locManualInput[v.id]?.lat || !locManualInput[v.id]?.lng || locSaving[v.id]}
+                                            onClick={() => handleSaveVendorLoc(v.id, locManualInput[v.id].lat, locManualInput[v.id].lng)}
+                                            className="bg-blue-500 text-white px-3 rounded-lg text-xs font-bold disabled:opacity-40"
+                                        >
+                                            {locSaving[v.id] ? '...' : 'Save'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Opening Hours */}
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">⏰ Opening Hours</label>
+                                    <div className="flex gap-2 items-center">
+                                        <div className="flex-1">
+                                            <p className="text-[10px] text-gray-400 mb-0.5">Opens</p>
+                                            <input
+                                                type="time"
+                                                value={locManualInput[v.id]?.openTime ?? (v.openTime || '')}
+                                                onChange={e => setLocManualInput(prev => ({ ...prev, [v.id]: { ...prev[v.id], openTime: e.target.value } }))}
+                                                className="w-full p-2 text-sm rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                            />
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-[10px] text-gray-400 mb-0.5">Closes</p>
+                                            <input
+                                                type="time"
+                                                value={locManualInput[v.id]?.closeTime ?? (v.closeTime || '')}
+                                                onChange={e => setLocManualInput(prev => ({ ...prev, [v.id]: { ...prev[v.id], closeTime: e.target.value } }))}
+                                                className="w-full p-2 text-sm rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                            />
+                                        </div>
+                                        <button
+                                            className="mt-4 bg-green-500 text-white px-3 py-2 rounded-lg text-xs font-bold disabled:opacity-40"
+                                            disabled={!locManualInput[v.id]?.openTime && !locManualInput[v.id]?.closeTime}
+                                            onClick={async () => {
+                                                const { openTime, closeTime } = locManualInput[v.id] || {};
+                                                if (!openTime || !closeTime) return;
+                                                setLocSaving(prev => ({ ...prev, [v.id]: true }));
+                                                await saveVendorLocation(v.id, v.lat, v.lng, openTime, closeTime);
+                                                setLocSaving(prev => ({ ...prev, [v.id]: false }));
+                                                getVendorsWithLocation().then(setVendorsWithLocation);
+                                            }}
+                                        >
+                                            Save Hours
+                                        </button>
+                                    </div>
+                                    {v.openTime && v.closeTime && (
+                                        <p className="text-[11px] text-green-600 font-bold mt-1">✅ Set: {v.openTime} – {v.closeTime}</p>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 )}
 
                 {activeTab === 'banners' && isSuperAdmin && (
@@ -533,6 +741,21 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                                             <p className="text-xs text-orange-600 font-bold">📝 Note: {selectedOrder.deliveryNote}</p>
                                                         </div>
                                                     )}
+                                                    {/* 🗺️ Map link — uses GPS coords for accuracy */}
+                                                    {selectedOrder.orderType !== 'pickup' && (
+                                                        <a
+                                                            href={
+                                                                selectedOrder.customerLat && selectedOrder.customerLng
+                                                                    ? `https://www.google.com/maps/dir/?api=1&destination=${selectedOrder.customerLat},${selectedOrder.customerLng}`
+                                                                    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedOrder.deliveryAddress + ' ' + (selectedOrder.landmark || ''))}`
+                                                            }
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="flex justify-center items-center gap-2 bg-blue-500 text-white py-2 rounded-xl font-bold text-xs hover:bg-blue-600 transition-colors"
+                                                        >
+                                                            🗺️ {selectedOrder.customerLat ? 'Navigate to Customer' : 'Open in Google Maps'}
+                                                        </a>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
@@ -651,7 +874,40 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                 <textarea required placeholder="Description..." className="w-full p-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-none h-20 resize-none dark:text-white" value={newItem.desc || ''} onChange={e => setNewItem({ ...newItem, desc: e.target.value })} />
                                 <button disabled={isSubmitting} className="w-full bg-gray-900 dark:bg-orange-600 text-white font-bold py-3 rounded-xl">{isSubmitting ? 'Uploading...' : 'Save Item'}</button>
                             </form></div>
-                        <div className="space-y-3">{filteredMarketData.map(item => (<ProductCard key={item.id} item={item} isAdmin={true} onEdit={handleEditClick} onDelete={handleDelete} />))}</div>
+                        <div className="space-y-6">
+                            {isSuperAdmin ? (
+                                // Group by vendor for super admin
+                                Object.entries(
+                                    filteredMarketData.reduce((groups, item) => {
+                                        const v = item.vendor || 'Unknown';
+                                        if (!groups[v]) groups[v] = [];
+                                        groups[v].push(item);
+                                        return groups;
+                                    }, {})
+                                ).sort(([a], [b]) => a.localeCompare(b)).map(([vendorName, items]) => (
+                                    <div key={vendorName}>
+                                        {/* Vendor header */}
+                                        <div className="flex items-center gap-3 mb-2 sticky top-0 bg-gray-50 dark:bg-gray-950 py-1 z-10">
+                                            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+                                            <span className="text-xs font-black uppercase tracking-widest text-orange-500 whitespace-nowrap">
+                                                🏪 {vendorName} <span className="text-gray-400 font-normal">({items.length})</span>
+                                            </span>
+                                            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+                                        </div>
+                                        <div className="space-y-3">
+                                            {items.map(item => (
+                                                <ProductCard key={item.id} item={item} isAdmin={true} onEdit={handleEditClick} onDelete={handleDelete} />
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                // Flat list for vendor-specific admins (they only see their own)
+                                filteredMarketData.map(item => (
+                                    <ProductCard key={item.id} item={item} isAdmin={true} onEdit={handleEditClick} onDelete={handleDelete} />
+                                ))
+                            )}
+                        </div>
                     </>
                 )}
             </div>

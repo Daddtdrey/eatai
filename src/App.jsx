@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-    ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share
+    ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share, MapPin
 } from 'lucide-react';
 import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors, logVisit } from './firebase.js';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -31,7 +31,9 @@ export default function EatAi() {
     const [vendorsByLocation, setVendorsByLocation] = useState(FALLBACK_VENDORS);
     const [vendorMetadata, setVendorMetadata] = useState({});
 
-
+    // 🟢 App-entry location detection (like Uber Eats)
+    const [detectedArea, setDetectedArea] = useState(null);
+    const [locationLoading, setLocationLoading] = useState(false);
 
     // 🟢 Pagination State
     const [lastDoc, setLastDoc] = useState(null);
@@ -90,6 +92,28 @@ export default function EatAi() {
             logVisit();
             sessionStorage.setItem('eatai_visited', today);
         }
+    }, []);
+
+    // 🟢 App-entry location detection (like Uber Eats/DoorDash)
+    useEffect(() => {
+        if (!navigator.geolocation) return;
+        setLocationLoading(true);
+        navigator.geolocation.getCurrentPosition(
+            async (pos) => {
+                try {
+                    const resp = await fetch(
+                        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`,
+                        { headers: { 'Accept-Language': 'en' } }
+                    );
+                    const data = await resp.json();
+                    const a = data.address || {};
+                    setDetectedArea(a.city || a.town || a.village || a.suburb || a.county || 'Your Area');
+                } catch { /* silently fail */ }
+                setLocationLoading(false);
+            },
+            () => setLocationLoading(false), // no error shown if denied
+            { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+        );
     }, []);
 
     // Dark Mode Effect
@@ -350,11 +374,30 @@ export default function EatAi() {
                     globalWallet={null}
                     user={user}
                     city={city}
+                    vendorMetadata={vendorMetadata}
+                    vendor={vendor}
                 />
 
                 {/* HEADER */}
-                <header className="flex-none flex items-center justify-between px-6 py-4 bg-[#FDFBF7]/80 backdrop-blur-md dark:bg-gray-900/80 shadow-sm z-40 transition-colors border-b border-gray-200/50 dark:border-gray-800">
-                    <div className="text-xl font-black text-orange-500 cursor-pointer" onClick={() => setCurrentView('home')}>EatAi</div>
+                <header className="flex-none flex items-center justify-between px-4 py-3 bg-[#FDFBF7]/80 backdrop-blur-md dark:bg-gray-900/80 shadow-sm z-40 transition-colors border-b border-gray-200/50 dark:border-gray-800">
+                    <div className="flex items-center gap-2">
+                        <div className="text-xl font-black text-orange-500 cursor-pointer" onClick={() => setCurrentView('home')}>EatAi</div>
+                        {/* 🟢 Location pill — shows detected area */}
+                        {locationLoading && (
+                            <div className="flex items-center gap-1 text-xs text-gray-400 animate-pulse">
+                                <MapPin className="w-3 h-3" /> Detecting...
+                            </div>
+                        )}
+                        {detectedArea && !locationLoading && (
+                            <button
+                                onClick={() => { setDetectedArea(null); setLocationLoading(true); if (navigator.geolocation) { navigator.geolocation.getCurrentPosition(async (pos) => { try { const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`, { headers: { 'Accept-Language': 'en' } }); const d = await r.json(); const a = d.address || {}; setDetectedArea(a.city || a.town || a.village || a.suburb || a.county || 'Your Area'); } catch { } setLocationLoading(false); }, () => setLocationLoading(false), { enableHighAccuracy: true, timeout: 8000 }); } }}
+                                className="flex items-center gap-1 text-xs font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-orange-50 dark:hover:bg-gray-700 px-2 py-1 rounded-full transition-colors"
+                            >
+                                <MapPin className="w-3 h-3 text-orange-500" />
+                                {detectedArea}
+                            </button>
+                        )}
+                    </div>
                     <div className="flex items-center gap-3">
                         <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">{darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}</button>
                         <button onClick={logout} className="p-2 rounded-full hover:bg-red-50 text-red-500 transition-colors"><LogOut className="w-5 h-5" /></button>
@@ -362,7 +405,7 @@ export default function EatAi() {
                 </header>
 
                 <main className="flex-1 overflow-hidden relative flex flex-col">
-                    {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} />}
+                    {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} setVendor={setVendor} setCity={setCity} />}
 
                     {/* 🟢 PASS LOCATIONS */}
                     {currentView === 'location' &&

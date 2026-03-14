@@ -3,6 +3,8 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -56,18 +58,27 @@ export const messaging = getMessaging(app);
 
 export const signInWithGoogle = async () => {
   try {
-    const result = await signInWithPopup(auth, googleProvider);
-    const userRef = doc(db, "users", result.user.uid);
-    const userSnap = await getDoc(userRef);
-    if (!userSnap.exists()) {
-      await setDoc(userRef, {
-        email: result.user.email,
-        name: result.user.displayName,
-        createdAt: new Date().toISOString()
-      });
+    await signInWithRedirect(auth, googleProvider);
+  } catch (error) { console.error("Error redirecting to Google sign in", error); }
+};
+
+export const checkGoogleRedirectResult = async () => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result && result.user) {
+      const userRef = doc(db, "users", result.user.uid);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        await setDoc(userRef, {
+          email: result.user.email,
+          name: result.user.displayName,
+          createdAt: new Date().toISOString()
+        });
+      }
+      return result.user;
     }
-    return result.user;
-  } catch (error) { console.error("Error signing in", error); }
+  } catch (error) { console.error("Error parsing redirect result", error); }
+  return null;
 };
 
 export const signUpWithEmail = async (email, password, name) => {

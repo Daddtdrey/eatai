@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share, MapPin
 } from 'lucide-react';
-import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors, logVisit } from './firebase.js';
+import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors, logVisit, checkGoogleRedirectResult } from './firebase.js';
 import { onAuthStateChanged } from 'firebase/auth';
 
 // 🟢 IMPORT MODULES
@@ -136,6 +136,9 @@ export default function EatAi() {
     }, [vendor]);
 
     useEffect(() => {
+        // 🟢 NEW: Process Google Sign-In redirect if coming back from webview redirect
+        checkGoogleRedirectResult();
+
         const u = onAuthStateChanged(auth, (c) => {
             setUser(c);
             setAuthLoading(false);

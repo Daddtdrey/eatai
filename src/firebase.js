@@ -11,7 +11,7 @@ import {
 import {
   getFirestore, doc, setDoc, getDoc, collection, addDoc, deleteDoc, updateDoc,
   query, where, getDocs, writeBatch, increment, onSnapshot, orderBy, runTransaction,
-  limit, startAfter
+  limit, startAfter, enableMultiTabIndexedDbPersistence
 } from "firebase/firestore";
 import { getStorage, ref, uploadBytes, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
@@ -37,6 +37,16 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 export const db = getFirestore(app);
+
+// 🟢 NEW: Enable Offline Persistence (Fixes Wi-Fi to Cellular dropouts)
+enableMultiTabIndexedDbPersistence(db).catch((err) => {
+  if (err.code == 'failed-precondition') {
+    console.warn("Offline persistence failed: multiple tabs open");
+  } else if (err.code == 'unimplemented') {
+    console.warn("Offline persistence not supported by browser");
+  }
+});
+
 export const storage = getStorage(app);
 export const messaging = getMessaging(app);
 

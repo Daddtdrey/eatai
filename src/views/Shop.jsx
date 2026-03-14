@@ -701,7 +701,7 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
             );
 
             // --- 9. CHECKOUT MODALS (WITH AUTO DISTANCE PRICING) ---
-            export const PaymentModal = ({isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city, vendorMetadata, vendor}) => {
+            export const PaymentModal = ({isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city, vendorMetadata, vendor, deliveryPricingConfig}) => {
     if (!isOpen) return null;
             const [processing, setProcessing] = useState(false);
             const [paymentStage, setPaymentStage] = useState(null);
@@ -750,14 +750,14 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
             const meta = vendorMetadata?.[vendor];
             if (meta?.lat && meta?.lng) {
                 setVendorHasGPS(true);
-            const result = getAutoDeliveryFee(meta.lat, meta.lng, customerCoords.lat, customerCoords.lng, cart);
+            const result = getAutoDeliveryFee(meta.lat, meta.lng, customerCoords.lat, customerCoords.lng, cart, deliveryPricingConfig);
             setAutoFeeResult(result);
         } else {
                 // Vendor has no GPS set — use base fee and warn
                 setVendorHasGPS(false);
-            setAutoFeeResult({fee: DEFAULT_PRICING.baseFee, distance: null, isAuto: false });
+            setAutoFeeResult({fee: deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee, distance: null, isAuto: false });
         }
-    }, [customerCoords, vendor, vendorMetadata, cart]);
+    }, [customerCoords, vendor, vendorMetadata, cart, deliveryPricingConfig]);
 
     // 🟢 Address autocomplete: search Nominatim with debounce as user types
     const handleAddrQueryChange = (val) => {
@@ -819,8 +819,8 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
 
             // 🟢 Delivery fee: auto distance if coords captured, else base fee
             const deliveryFee = orderType === 'pickup' ? 0
-            : customerCoords ? (autoFeeResult?.fee ?? DEFAULT_PRICING.baseFee)
-            : DEFAULT_PRICING.baseFee;
+            : customerCoords ? (autoFeeResult?.fee ?? (deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee))
+            : (deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee);
 
             const grandTotal = total + deliveryFee;
 
@@ -1110,7 +1110,7 @@ const isVendorOpen = (vendorName, vendorMetadata) => {
     return current >= open && current < close;
 };
 
-export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeFromCart, cartTotal, globalWallet, user, setCart, city, vendorMetadata, vendor }) => {
+export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeFromCart, cartTotal, globalWallet, user, setCart, city, vendorMetadata, vendor, deliveryPricingConfig }) => {
     const [paymentMethod, setPaymentMethod] = useState('paystack');
     const [showModal, setShowModal] = useState(false);
 
@@ -1121,7 +1121,7 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
 
     return (
         <>
-            <PaymentModal isOpen={showModal} onClose={() => setShowModal(false)} total={cartTotal} paymentMethod={paymentMethod} user={user} cart={cart} globalWallet={globalWallet} onSuccess={() => { setShowModal(false); setCart([]); setCurrentView('orders'); alert("Order Placed!"); }} city={city} vendorMetadata={vendorMetadata} vendor={vendor} />
+            <PaymentModal isOpen={showModal} onClose={() => setShowModal(false)} total={cartTotal} paymentMethod={paymentMethod} user={user} cart={cart} globalWallet={globalWallet} onSuccess={() => { setShowModal(false); setCart([]); setCurrentView('orders'); alert("Order Placed!"); }} city={city} vendorMetadata={vendorMetadata} vendor={vendor} deliveryPricingConfig={deliveryPricingConfig} />
             <div className="fixed inset-0 z-50 flex justify-end pointer-events-none">
                 <div className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${currentView === 'cart' ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`} onClick={() => setCurrentView(marketSection ? 'market' : 'home')} />
                 <div className={`relative bg-white dark:bg-gray-900 shadow-2xl w-full max-w-md h-full flex flex-col pointer-events-auto transition-transform duration-300 transform ${currentView === 'cart' ? 'translate-x-0' : 'translate-x-full'}`}>

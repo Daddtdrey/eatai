@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share, MapPin
 } from 'lucide-react';
-import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors, logVisit, checkGoogleRedirectResult } from './firebase.js';
+import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors, logVisit, checkGoogleRedirectResult, getDeliveryPricingConfig } from './firebase.js';
 import { onAuthStateChanged } from 'firebase/auth';
 
 // 🟢 IMPORT MODULES
@@ -13,6 +13,7 @@ import {
 } from './views/Shop.jsx';
 import { AdminView, LogisticsView } from './views/Dashboards.jsx';
 import { SUPER_ADMINS, LOGISTICS_EMAILS, SUB_ADMINS, VENDORS_BY_LOCATION as FALLBACK_VENDORS, LOCATIONS } from './config.js';
+import { DEFAULT_PRICING } from './deliveryPricing.js';
 
 export default function EatAi() {
     // --- STATE MANAGEMENT ---
@@ -34,6 +35,9 @@ export default function EatAi() {
     // 🟢 App-entry location detection (like Uber Eats)
     const [detectedArea, setDetectedArea] = useState(null);
     const [locationLoading, setLocationLoading] = useState(false);
+
+    // 🟢 Delivery Pricing Config
+    const [deliveryPricingConfig, setDeliveryPricingConfig] = useState(DEFAULT_PRICING);
 
     // 🟢 Pagination State
     const [lastDoc, setLastDoc] = useState(null);
@@ -199,6 +203,10 @@ export default function EatAi() {
                 // 3. Logos
                 const logos = await getVendorLogos();
                 setVendorLogos(logos);
+
+                // 4. Delivery Pricing Config
+                const pricingCfg = await getDeliveryPricingConfig();
+                if (pricingCfg) setDeliveryPricingConfig(pricingCfg);
             } catch (e) { console.error("Error loading data", e); }
 
             setLoadingData(false);
@@ -379,6 +387,7 @@ export default function EatAi() {
                     city={city}
                     vendorMetadata={vendorMetadata}
                     vendor={vendor}
+                    deliveryPricingConfig={deliveryPricingConfig}
                 />
 
                 {/* HEADER */}

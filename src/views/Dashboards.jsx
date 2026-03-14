@@ -13,9 +13,10 @@ import {
     updateOrderStatus, deleteOrder, addProduct, updateProduct, deleteProduct,
     uploadImage, saveVendorLogo, getAdminRole, requestNotificationPermission,
     getBanners, saveBanner, deleteBanner, getTodayVisitors, saveVendorLocation,
-    getVendorsWithLocation
+    getVendorsWithLocation, getDeliveryPricingConfig, saveDeliveryPricingConfig
 } from '../firebase.js';
 import { SUPER_ADMINS, SUB_ADMINS, LOCATIONS, VENDORS_BY_LOCATION } from '../config.js';
+import { DEFAULT_PRICING } from '../deliveryPricing.js';
 
 const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
 
@@ -220,11 +221,28 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
     const [locManualInput, setLocManualInput] = useState({}); // { vendorId: { lat, lng } }
     const [locSaving, setLocSaving] = useState({});
 
+    // 🟢 Delivery Pricing State (super admin)
+    const [pricingConfig, setPricingConfig] = useState(DEFAULT_PRICING);
+    const [isSavingPricing, setIsSavingPricing] = useState(false);
+
     useEffect(() => {
         if (activeTab === 'locations') {
             getVendorsWithLocation().then(setVendorsWithLocation);
         }
+        if (activeTab === 'pricing') {
+            getDeliveryPricingConfig().then(cfg => {
+                if (cfg) setPricingConfig(cfg);
+            });
+        }
     }, [activeTab]);
+
+    const handleSavePricingConfig = async () => {
+        setIsSavingPricing(true);
+        const success = await saveDeliveryPricingConfig(pricingConfig);
+        setIsSavingPricing(false);
+        if (success) alert('Delivery pricing updated successfully!');
+        else alert('Failed to update pricing.');
+    };
 
     const [locSearchLoading, setLocSearchLoading] = useState({});
 
@@ -454,12 +472,71 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                 <button onClick={() => setActiveTab('analytics')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'analytics' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><BarChart3 className="w-4 h-4" /> Stats</button>
                 {isSuperAdmin && <button onClick={() => setActiveTab('banners')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'banners' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><ImageIcon className="w-4 h-4" /> Banners</button>}
                 {isSuperAdmin && <button onClick={() => setActiveTab('locations')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'locations' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><MapPin className="w-4 h-4" /> Locations</button>}
+                {isSuperAdmin && <button onClick={() => setActiveTab('pricing')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'pricing' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><Wrench className="w-4 h-4" /> Pricing</button>}
             </div>
 
             <div className="flex-1 overflow-y-auto pb-32 scrollbar-hide min-h-0">
 
                 {activeTab === 'analytics' && (
                     <AnalyticsDashboard orders={adminOrders} role={role} myVendorName={myVendorName} />
+                )}
+
+                {/* 🟢 PRICING TAB (Super Admin Only) */}
+                {activeTab === 'pricing' && isSuperAdmin && (
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold dark:text-white">Delivery Pricing</h2>
+                            <button onClick={handleSavePricingConfig} disabled={isSavingPricing} className="bg-orange-500 text-white px-4 py-2 text-sm font-bold rounded-xl shadow-lg disabled:opacity-50">
+                                {isSavingPricing ? 'Saving...' : 'Save Pricing Config'}
+                            </button>
+                        </div>
+                        <div className="bg-orange-50 dark:bg-orange-900/20 text-orange-800 dark:text-orange-200 p-4 font-medium text-sm rounded-xl">
+                            Adjust the distance-based auto-pricing logic. Changes are applied immediately to new orders.
+                        </div>
+
+                        <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm space-y-4">
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Base Fee (₦)</label>
+                                <p className="text-[10px] text-gray-400 mb-2">The starting minimum delivery cost before distance is applied. Default: ₦1100.</p>
+                                <input
+                                    type="number"
+                                    value={pricingConfig.baseFee}
+                                    onChange={e => setPricingConfig({ ...pricingConfig, baseFee: Number(e.target.value) })}
+                                    className="w-full p-3 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Cost Per Kilometer (₦)</label>
+                                <p className="text-[10px] text-gray-400 mb-2">How much to add for every 1km of distance from the vendor to customer. Default: ₦300.</p>
+                                <input
+                                    type="number"
+                                    value={pricingConfig.perKmRate}
+                                    onChange={e => setPricingConfig({ ...pricingConfig, perKmRate: Number(e.target.value) })}
+                                    className="w-full p-3 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Maximum Fee Cap (₦)</label>
+                                <p className="text-[10px] text-gray-400 mb-2">Delivery fee will never exceed this amount, no matter how far. Default: ₦3000.</p>
+                                <input
+                                    type="number"
+                                    value={pricingConfig.maxFee}
+                                    onChange={e => setPricingConfig({ ...pricingConfig, maxFee: Number(e.target.value) })}
+                                    className="w-full p-3 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Multi-Vendor Surcharge (₦)</label>
+                                <p className="text-[10px] text-gray-400 mb-2">Extra fee added if the customer's cart contains items from multiple different vendors. Default: ₦350.</p>
+                                <input
+                                    type="number"
+                                    value={pricingConfig.multiVendorSurcharge}
+                                    onChange={e => setPricingConfig({ ...pricingConfig, multiVendorSurcharge: Number(e.target.value) })}
+                                    className="w-full p-3 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                />
+                            </div>
+                        </div>
+                    </div>
                 )}
 
                 {/* 🟢 LOCATIONS TAB (Super Admin Only) */}

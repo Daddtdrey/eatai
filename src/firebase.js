@@ -242,6 +242,7 @@ export const getVendorsWithLocation = async () => {
   } catch (e) { console.error(e); return []; }
 };
 
+
 // 🟢 CRITICAL: This fetches the vendors for the dropdown
 export const getGlobalVendors = async () => {
   try {

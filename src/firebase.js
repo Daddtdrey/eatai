@@ -58,8 +58,25 @@ export const messaging = getMessaging(app);
 
 export const signInWithGoogle = async () => {
   try {
-    await signInWithRedirect(auth, googleProvider);
-  } catch (error) { console.error("Error redirecting to Google sign in", error); }
+    // 🟢 HYBRID FIX: Web requires Popups (redirects break state/cookies). Mobile requires Redirects (webviews block popups).
+    const isNative = window.Capacitor?.isNative;
+    if (isNative) {
+      await signInWithRedirect(auth, googleProvider);
+    } else {
+      const result = await signInWithPopup(auth, googleProvider);
+      // For popup, we handle the document creation immediately
+      const userRef = doc(db, "users", result.user.uid);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        await setDoc(userRef, {
+          email: result.user.email,
+          name: result.user.displayName,
+          createdAt: new Date().toISOString()
+        });
+      }
+      return result.user;
+    }
+  } catch (error) { console.error("Error with Google sign in", error); throw error; }
 };
 
 export const checkGoogleRedirectResult = async () => {

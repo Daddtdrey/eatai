@@ -1,0 +1,24 @@
+rules_version = '2';
+
+// Craft rules based on data in your Firestore database
+// allow write: if firestore.get(
+//    /databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin;
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Default: Deny everything
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // High-Resolution/Product Images folder
+    match /images/{imageId} {
+      // Anyone can view the images
+      allow read: if true;
+      
+      // Currently letting any authenticated user upload, as vendor validation is done frontend
+      // In production, you would validate against Firestore `/admins/`
+      allow write: if request.auth != null;
+    }
+  }
+}

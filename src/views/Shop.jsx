@@ -136,7 +136,7 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity }) => {
         {
             label: 'Jollof Rice',
             emoji: '🍚',
-            img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767032932/Nigerian_Jollof_rice__fried_plantains_and_chicken_-removebg-preview_jthyvl.png',
+            img: 'https://images.unsplash.com/photo-1596560548464-f010549b84d7?w=200&q=80',
             vendor: 'Big taste',
             city: 'Ekpoma',
         },
@@ -171,10 +171,10 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity }) => {
 
     // Mock Data for Top Vendors
     const allTopVendors = [
-        { name: 'Big taste', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768247815/ve99pcvok1pzrzdrfll4.jpg', tags: 'Rice • Pasta' },
-        { name: 'DannyCook', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768584381/emfhjczjmg2pfhxwqem2.jpg', tags: 'Grill • Chicken' },
-        { name: 'Phattie ChopBox', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1765371009/nwz7xt7g5cuuallmrpt0.jpg', tags: 'Snacks' },
-        { name: 'Yummy You', img: 'https://res.cloudinary.com/dmsq7n9k6/image/upload/v1768288363/eiic6wvc1qdhbnpgcqst.jpg', tags: 'Snacks' }
+        { name: 'Big taste', img: 'https://images.unsplash.com/photo-1626200419199-391ae4be7a41?w=400&q=80', tags: 'Rice • Pasta' },
+        { name: 'DannyCook', img: 'https://images.unsplash.com/photo-1598514982205-f36b96d1e8d4?w=400&q=80', tags: 'Grill • Chicken' },
+        { name: 'Phattie ChopBox', img: 'https://images.unsplash.com/photo-1605333398741-efc88081aadd?w=400&q=80', tags: 'Snacks' },
+        { name: 'Yummy You', img: 'https://images.unsplash.com/photo-1563805042-7684c8e9e533?w=400&q=80', tags: 'Snacks' }
     ];
 
     const filteredVendors = allTopVendors.filter(v =>
@@ -270,8 +270,9 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity }) => {
                     </div>
 
                     {/* BIG FOOD IMAGES */}
-                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767032932/Nigerian_Jollof_rice__fried_plantains_and_chicken_-removebg-preview_jthyvl.png" className="absolute -right-10 -bottom-8 w-64 h-64 object-contain drop-shadow-2xl transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 z-20" alt="Burger" />
-                    <img src="https://res.cloudinary.com/dmsq7n9k6/image/upload/v1767041008/These_Bold_Burger_Bowls_are_the_ultimate_low-carb_-removebg-preview_kjodwx.png" className="absolute right-36 top-6 w-24 h-24 object-contain opacity-90 rotate-12 z-10 blur-[1px]" alt="Pizza" />
+                    <div className="absolute -right-8 -bottom-6 w-56 h-56 bg-orange-200/20 backdrop-blur-sm rounded-full blur-xl z-0"></div>
+                    <img src="https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&q=80" className="absolute -right-10 -bottom-8 w-64 h-64 object-cover rounded-full shadow-2xl drop-shadow-2xl transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 z-20 border-4 border-white/20" alt="Burger" />
+                    <img src="https://images.unsplash.com/photo-1513104890138-7c749659a591?w=200&q=80" className="absolute right-36 top-6 w-24 h-24 object-cover rounded-full shadow-lg opacity-90 rotate-12 z-10 border-2 border-white/30 group-hover:-rotate-12 transition-all duration-500" alt="Pizza" />
                 </div>
 
                 {/* TOP VENDORS */}

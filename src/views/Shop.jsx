@@ -701,7 +701,7 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
             );
 
             // --- 9. CHECKOUT MODALS (WITH AUTO DISTANCE PRICING) ---
-            export const PaymentModal = ({isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city, vendorMetadata, vendor, deliveryPricingConfig}) => {
+            export const PaymentModal = ({isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city, vendorMetadata, vendor, deliveryPricingConfig, globalCustomerCoords}) => {
     if (!isOpen) return null;
             const [processing, setProcessing] = useState(false);
             const [paymentStage, setPaymentStage] = useState(null);
@@ -710,18 +710,10 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
             const [activeMethod, setActiveMethod] = useState(paymentMethod || 'paystack');
 
             // 🟢 GPS State
-            const [gpsState, setGpsState] = useState('idle'); // idle | loading | success | denied
-            const [customerCoords, setCustomerCoords] = useState(null); // {lat, lng}
             const [autoFeeResult, setAutoFeeResult] = useState(null); // result from getAutoDeliveryFee
             const [detectedAddress, setDetectedAddress] = useState(null); // human-readable address from Nominatim
             const [vendorHasGPS, setVendorHasGPS] = useState(true); // false if vendor hasn't set their location
 
-            // 🟢 Address autocomplete state (used when GPS is denied or user prefers typing)
-            const [showAddressSearch, setShowAddressSearch] = useState(false);
-            const [addrQuery, setAddrQuery] = useState('');
-            const [addrSuggestions, setAddrSuggestions] = useState([]);
-            const [addrSearching, setAddrSearching] = useState(false);
-            const addrDebounceRef = useRef(null);
 
     // 🟢 Reverse geocode coords using OpenStreetMap Nominatim (free, no API key)
     const reverseGeocode = async (lat, lng) => {
@@ -744,82 +736,33 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
         }
     };
 
-    // 🟢 Auto-calculate fee whenever customer coords are captured
+    // 🟢 Reverse geocode global coords on mount if not already done
     useEffect(() => {
-        if (!customerCoords) return;
+        if (!globalCustomerCoords || detectedAddress) return;
+        reverseGeocode(globalCustomerCoords.lat, globalCustomerCoords.lng).then(addr => {
+            setDetectedAddress(addr);
+            setForm(prev => ({...prev, address: prev.address || addr }));
+        });
+    }, [globalCustomerCoords, detectedAddress]);
+
+    // 🟢 Auto-calculate fee whenever global customer coords update
+    useEffect(() => {
+        if (!globalCustomerCoords) return;
             const meta = vendorMetadata?.[vendor];
             if (meta?.lat && meta?.lng) {
                 setVendorHasGPS(true);
-            const result = getAutoDeliveryFee(meta.lat, meta.lng, customerCoords.lat, customerCoords.lng, cart, deliveryPricingConfig);
+            const result = getAutoDeliveryFee(meta.lat, meta.lng, globalCustomerCoords.lat, globalCustomerCoords.lng, cart, deliveryPricingConfig);
             setAutoFeeResult(result);
         } else {
                 // Vendor has no GPS set — use base fee and warn
                 setVendorHasGPS(false);
             setAutoFeeResult({fee: deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee, distance: null, isAuto: false });
         }
-    }, [customerCoords, vendor, vendorMetadata, cart, deliveryPricingConfig]);
-
-    // 🟢 Address autocomplete: search Nominatim with debounce as user types
-    const handleAddrQueryChange = (val) => {
-                setAddrQuery(val);
-            setAddrSuggestions([]);
-            if (addrDebounceRef.current) clearTimeout(addrDebounceRef.current);
-            if (!val.trim() || val.length < 3) return;
-        addrDebounceRef.current = setTimeout(async () => {
-                setAddrSearching(true);
-            try {
-                const resp = await fetch(
-            `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(val)}&limit=5&countrycodes=ng&addressdetails=1`,
-            {headers: {'Accept-Language': 'en' } }
-            );
-            const results = await resp.json();
-            setAddrSuggestions(results);
-            } catch {setAddrSuggestions([]); }
-            setAddrSearching(false);
-        }, 500);
-    };
-
-    // When user picks a suggestion from autocomplete
-    const handlePickAddressSuggestion = (result) => {
-        const lat = parseFloat(result.lat);
-            const lng = parseFloat(result.lon);
-            const label = result.display_name?.split(',').slice(0, 3).join(', ');
-            setCustomerCoords({lat, lng});
-            setDetectedAddress(label);
-            setGpsState('success');
-            setShowAddressSearch(false);
-            setAddrQuery('');
-            setAddrSuggestions([]);
-        setForm(prev => ({...prev, address: prev.address || label }));
-    };
-
-    // 🟢 GPS Capture + reverse geocode
-    const handleUseGPS = () => {
-        if (!navigator.geolocation) return alert("Geolocation not supported on this device.");
-            setGpsState('loading');
-            setShowAddressSearch(false);
-            navigator.geolocation.getCurrentPosition(
-            async (pos) => {
-                const {latitude: lat, longitude: lng } = pos.coords;
-            setCustomerCoords({lat, lng});
-            setGpsState('success');
-            // Reverse geocode in background
-            const addr = await reverseGeocode(lat, lng);
-            setDetectedAddress(addr);
-                // Auto-fill the address field if it's empty
-                setForm(prev => ({...prev, address: prev.address || addr }));
-            },
-            () => {
-                setGpsState('denied');
-            setShowAddressSearch(true); // auto-open address search on denial
-            },
-            {enableHighAccuracy: true, timeout: 10000 }
-            );
-    };
+    }, [globalCustomerCoords, vendor, vendorMetadata, cart, deliveryPricingConfig]);
 
             // 🟢 Delivery fee: auto distance if coords captured, else base fee
             const deliveryFee = orderType === 'pickup' ? 0
-            : customerCoords ? (autoFeeResult?.fee ?? (deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee))
+            : globalCustomerCoords ? (autoFeeResult?.fee ?? (deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee))
             : (deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee);
 
             const grandTotal = total + deliveryFee;
@@ -937,30 +880,19 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
                         {orderType === 'delivery' && (
                             <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
 
-                                {/* 🟢 GPS SECTION */}
+                                {/* 🟢 GPS SECTION (Global enforced) */}
                                 <div>
                                     <div className="flex justify-between items-center mb-2">
                                         <label className="text-xs font-bold text-gray-500">Delivery Location</label>
-                                        {gpsState !== 'success' && (
-                                            <button
-                                                onClick={handleUseGPS}
-                                                disabled={gpsState === 'loading'}
-                                                className="text-xs text-orange-500 font-bold flex items-center gap-1 disabled:opacity-50"
-                                            >
-                                                <Navigation className="w-3 h-3" />
-                                                {gpsState === 'loading' ? 'Getting location...' : 'Use My GPS'}
-                                            </button>
-                                        )}
                                     </div>
 
                                     {/* GPS SUCCESS: show auto fee */}
-                                    {gpsState === 'success' && autoFeeResult && (
+                                    {globalCustomerCoords && autoFeeResult ? (
                                         <div className="space-y-2">
                                             <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-3">
                                                 <div className="flex items-center gap-2 mb-1">
                                                     <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
-                                                    <span className="text-xs font-bold text-green-700 dark:text-green-400">Your Location Detected</span>
-                                                    <button onClick={() => { setGpsState('idle'); setCustomerCoords(null); setAutoFeeResult(null); setDetectedAddress(null); }} className="ml-auto text-xs text-gray-400 underline">Change</button>
+                                                    <span className="text-xs font-bold text-green-700 dark:text-green-400">Your Location Used</span>
                                                 </div>
                                                 {detectedAddress && (
                                                     <p className="text-xs text-gray-600 dark:text-gray-300 font-medium pl-6">{detectedAddress}</p>
@@ -981,62 +913,9 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
                                                 </p>
                                             )}
                                         </div>
-                                    )}
-
-                                    {/* GPS DENIED or user wants to type: address autocomplete */}
-                                    {(gpsState === 'denied' || showAddressSearch) && gpsState !== 'success' && (
-                                        <div className="space-y-2">
-                                            {gpsState === 'denied' && <p className="text-xs text-red-500 font-medium">GPS was denied — type your area or landmark below:</p>}
-                                            <div className="relative">
-                                                <input
-                                                    type="text"
-                                                    placeholder="Type street, area or landmark..."
-                                                    value={addrQuery}
-                                                    onChange={e => handleAddrQueryChange(e.target.value)}
-                                                    className="w-full p-2 pr-8 rounded-xl border dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
-                                                    autoFocus
-                                                />
-                                                {addrSearching && <span className="absolute right-2 top-2 text-xs text-orange-400">⏳</span>}
-                                            </div>
-                                            {addrSuggestions.length > 0 && (
-                                                <div className="bg-white dark:bg-gray-700 rounded-xl border dark:border-gray-600 overflow-hidden shadow-lg">
-                                                    {addrSuggestions.map((r, i) => (
-                                                        <button
-                                                            key={i}
-                                                            onClick={() => handlePickAddressSuggestion(r)}
-                                                            className="w-full text-left px-3 py-2 text-xs hover:bg-orange-50 dark:hover:bg-gray-600 border-b dark:border-gray-600 last:border-0 transition-colors"
-                                                        >
-                                                            <span className="font-bold text-orange-500">📍 </span>
-                                                            {r.display_name?.split(',').slice(0, 4).join(', ')}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            {addrQuery.length >= 3 && !addrSearching && addrSuggestions.length === 0 && (
-                                                <p className="text-xs text-gray-400">No suggestions. Try a nearby landmark or area name.</p>
-                                            )}
-                                            {gpsState === 'denied' && (
-                                                <button onClick={handleUseGPS} className="text-xs text-orange-500 underline">Try GPS again</button>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    {/* IDLE: prompt GPS + option to type */}
-                                    {gpsState === 'idle' && !showAddressSearch && (
-                                        <div className="space-y-2">
-                                            <button
-                                                onClick={handleUseGPS}
-                                                className="w-full border-2 border-dashed border-orange-300 rounded-xl p-3 flex items-center justify-center gap-2 text-orange-500 hover:bg-orange-50 transition-colors"
-                                            >
-                                                <Navigation className="w-4 h-4" />
-                                                <span className="text-sm font-bold">Tap to detect my location (GPS)</span>
-                                            </button>
-                                            <button
-                                                onClick={() => setShowAddressSearch(true)}
-                                                className="w-full text-xs text-gray-400 hover:text-gray-600 text-center py-1"
-                                            >
-                                                ✏️ Or type my address instead
-                                            </button>
+                                    ) : (
+                                        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-xl p-3 text-xs text-red-600">
+                                            ⚠️ We need your location to calculate delivery. Please reload and allow GPS access.
                                         </div>
                                     )}
                                 </div>
@@ -1084,7 +963,7 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
                     </div>
 
                     {activeMethod === 'paystack' ? (
-                        (orderType === 'delivery' && (!form.address || (!customerCoords && !form.deliveryAreaName))) ?
+                        (orderType === 'delivery' && (!form.address || !globalCustomerCoords)) ?
                             <button disabled className="w-full mt-4 bg-gray-300 dark:bg-gray-700 text-white font-bold py-4 rounded-xl cursor-not-allowed">Enter Delivery Details</button> :
                             <button onClick={() => handlePayment('paystack')} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Pay Now'}</button>
                     ) : (<button onClick={() => handlePayment('crypto')} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Confirm Crypto Transfer'}</button>)}
@@ -1110,7 +989,7 @@ const isVendorOpen = (vendorName, vendorMetadata) => {
     return current >= open && current < close;
 };
 
-export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeFromCart, cartTotal, globalWallet, user, setCart, city, vendorMetadata, vendor, deliveryPricingConfig }) => {
+export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeFromCart, cartTotal, globalWallet, user, setCart, city, vendorMetadata, vendor, deliveryPricingConfig, globalCustomerCoords }) => {
     const [paymentMethod, setPaymentMethod] = useState('paystack');
     const [showModal, setShowModal] = useState(false);
 
@@ -1121,7 +1000,7 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
 
     return (
         <>
-            <PaymentModal isOpen={showModal} onClose={() => setShowModal(false)} total={cartTotal} paymentMethod={paymentMethod} user={user} cart={cart} globalWallet={globalWallet} onSuccess={() => { setShowModal(false); setCart([]); setCurrentView('orders'); alert("Order Placed!"); }} city={city} vendorMetadata={vendorMetadata} vendor={vendor} deliveryPricingConfig={deliveryPricingConfig} />
+            <PaymentModal isOpen={showModal} onClose={() => setShowModal(false)} total={cartTotal} paymentMethod={paymentMethod} user={user} cart={cart} globalWallet={globalWallet} onSuccess={() => { setShowModal(false); setCart([]); setCurrentView('orders'); alert("Order Placed!"); }} city={city} vendorMetadata={vendorMetadata} vendor={vendor} deliveryPricingConfig={deliveryPricingConfig} globalCustomerCoords={globalCustomerCoords} />
             <div className="fixed inset-0 z-50 flex justify-end pointer-events-none">
                 <div className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${currentView === 'cart' ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`} onClick={() => setCurrentView(marketSection ? 'market' : 'home')} />
                 <div className={`relative bg-white dark:bg-gray-900 shadow-2xl w-full max-w-md h-full flex flex-col pointer-events-auto transition-transform duration-300 transform ${currentView === 'cart' ? 'translate-x-0' : 'translate-x-full'}`}>

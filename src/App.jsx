@@ -34,7 +34,11 @@ export default function EatAi() {
 
     // 🟢 App-entry location detection (like Uber Eats)
     const [detectedArea, setDetectedArea] = useState(null);
-    const [locationLoading, setLocationLoading] = useState(false);
+    const [locationLoading, setLocationLoading] = useState(true);
+    
+    // 🟢 Global GPS Enforcement
+    const [globalCustomerCoords, setGlobalCustomerCoords] = useState(null);
+    const [locationDenied, setLocationDenied] = useState(false);
 
     // 🟢 Delivery Pricing Config
     const [deliveryPricingConfig, setDeliveryPricingConfig] = useState(DEFAULT_PRICING);
@@ -100,24 +104,41 @@ export default function EatAi() {
 
     // 🟢 App-entry location detection (like Uber Eats/DoorDash)
     useEffect(() => {
-        if (!navigator.geolocation) return;
-        setLocationLoading(true);
-        navigator.geolocation.getCurrentPosition(
-            async (pos) => {
-                try {
-                    const resp = await fetch(
-                        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`,
-                        { headers: { 'Accept-Language': 'en' } }
-                    );
-                    const data = await resp.json();
-                    const a = data.address || {};
-                    setDetectedArea(a.city || a.town || a.village || a.suburb || a.county || 'Your Area');
-                } catch { /* silently fail */ }
-                setLocationLoading(false);
-            },
-            () => setLocationLoading(false), // no error shown if denied
-            { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
-        );
+        if (!navigator.geolocation) {
+            setLocationDenied(true);
+            setLocationLoading(false);
+            return;
+        }
+
+        const fetchLocation = () => {
+            setLocationLoading(true);
+            navigator.geolocation.getCurrentPosition(
+                async (pos) => {
+                    setLocationDenied(false);
+                    setGlobalCustomerCoords({
+                        lat: pos.coords.latitude,
+                        lng: pos.coords.longitude
+                    });
+                    try {
+                        const resp = await fetch(
+                            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`,
+                            { headers: { 'Accept-Language': 'en' } }
+                        );
+                        const data = await resp.json();
+                        const a = data.address || {};
+                        setDetectedArea(a.city || a.town || a.village || a.suburb || a.county || 'Your Area');
+                    } catch { /* silently fail */ }
+                    setLocationLoading(false);
+                },
+                () => {
+                    setLocationDenied(true);
+                    setLocationLoading(false);
+                },
+                { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+            );
+        };
+
+        fetchLocation();
     }, []);
 
     // Dark Mode Effect
@@ -388,6 +409,7 @@ export default function EatAi() {
                     vendorMetadata={vendorMetadata}
                     vendor={vendor}
                     deliveryPricingConfig={deliveryPricingConfig}
+                    globalCustomerCoords={globalCustomerCoords}
                 />
 
                 {/* HEADER */}
@@ -416,7 +438,27 @@ export default function EatAi() {
                     </div>
                 </header>
 
-                <main className="flex-1 overflow-hidden relative flex flex-col">
+                {/* 🔴 LOCATION ENFORCEMENT BLOCKER */}
+                {locationDenied && (
+                    <div className="absolute inset-0 z-50 bg-white dark:bg-gray-900 flex flex-col items-center justify-center p-6 text-center">
+                        <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center mb-6">
+                            <MapPin className="w-12 h-12 text-red-500" />
+                        </div>
+                        <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-2">Location Required</h2>
+                        <p className="text-gray-500 mb-8 max-w-sm">
+                            EatAi requires your exact location to find available vendors near you and accurately calculate your delivery fee. 
+                            Please allow location access in your browser settings to continue.
+                        </p>
+                        <button 
+                            onClick={() => window.location.reload()} 
+                            className="bg-orange-500 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-orange-600 transition-colors"
+                        >
+                            I've Enabled It — Reload
+                        </button>
+                    </div>
+                )}
+
+                <main className={`flex-1 overflow-hidden relative flex flex-col ${locationDenied ? 'hidden' : ''}`}>
                     {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} setVendor={setVendor} setCity={setCity} />}
 
                     {/* 🟢 PASS LOCATIONS */}

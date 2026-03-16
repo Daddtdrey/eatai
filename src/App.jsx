@@ -438,27 +438,9 @@ export default function EatAi() {
                     </div>
                 </header>
 
-                {/* 🔴 LOCATION ENFORCEMENT BLOCKER */}
-                {locationDenied && (
-                    <div className="absolute inset-0 z-50 bg-white dark:bg-gray-900 flex flex-col items-center justify-center p-6 text-center">
-                        <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center mb-6">
-                            <MapPin className="w-12 h-12 text-red-500" />
-                        </div>
-                        <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-2">Location Required</h2>
-                        <p className="text-gray-500 mb-8 max-w-sm">
-                            EatAi requires your exact location to find available vendors near you and accurately calculate your delivery fee. 
-                            Please allow location access in your browser settings to continue.
-                        </p>
-                        <button 
-                            onClick={() => window.location.reload()} 
-                            className="bg-orange-500 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-orange-600 transition-colors"
-                        >
-                            I've Enabled It — Reload
-                        </button>
-                    </div>
-                )}
+                {/* REMOVED: LOCATION ENFORCEMENT BLOCKER */}
 
-                <main className={`flex-1 overflow-hidden relative flex flex-col ${locationDenied ? 'hidden' : ''}`}>
+                <main className={`flex-1 overflow-hidden relative flex flex-col`}>
                     {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} setVendor={setVendor} setCity={setCity} />}
 
                     {/* 🟢 PASS LOCATIONS */}

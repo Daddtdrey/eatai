@@ -8,8 +8,12 @@ import {
   signOut,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  updateProfile
+  updateProfile,
+  signInWithCredential,
+  sendPasswordResetEmail,
+  deleteUser
 } from "firebase/auth";
+import { Capacitor } from "@capacitor/core";
 import {
   getFirestore, doc, setDoc, getDoc, collection, addDoc, deleteDoc, updateDoc,
   query, where, getDocs, writeBatch, increment, onSnapshot, orderBy, runTransaction,
@@ -17,6 +21,7 @@ import {
 } from "firebase/firestore";
 import { getStorage, ref, uploadBytes, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
+import { getFunctions } from "firebase/functions";
 import { VAPID_KEY } from "./config.js";
 
 
@@ -51,6 +56,7 @@ enableMultiTabIndexedDbPersistence(db).catch((err) => {
 
 export const storage = getStorage(app);
 export const messaging = getMessaging(app);
+export const functions = getFunctions(app, "us-central1"); // Ensure region matches backend
 
 // ==========================================
 // 1. AUTHENTICATION
@@ -58,12 +64,33 @@ export const messaging = getMessaging(app);
 
 export const signInWithGoogle = async () => {
   try {
-    // 🟢 HYBRID FIX: Web requires Popups (redirects break state/cookies). Mobile requires Redirects (webviews block popups).
-    const isNative = window.Capacitor?.isNative;
+    const isNative = Capacitor.isNativePlatform();
+    
     if (isNative) {
-      await signInWithRedirect(auth, googleProvider);
+      // 🟢 NATIVE APP (Capacitor/Android) — Use native plugin instead of browser redirects
+      const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+      const result = await FirebaseAuthentication.signInWithGoogle();
+      
+      if (!result.credential || !result.credential.idToken) throw new Error("Google Sign-In failed or cancelled");
+      
+      const credential = GoogleAuthProvider.credential(result.credential.idToken);
+      const userCredential = await signInWithCredential(auth, credential);
+      
+      // Handle the document creation
+      const userRef = doc(db, "users", userCredential.user.uid);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        await setDoc(userRef, {
+          email: userCredential.user.email,
+          name: userCredential.user.displayName,
+          createdAt: new Date().toISOString()
+        });
+      }
+      return userCredential.user;
     } else {
+      // 🟢 WEB BROWSER
       const result = await signInWithPopup(auth, googleProvider);
+      
       // For popup, we handle the document creation immediately
       const userRef = doc(db, "users", result.user.uid);
       const userSnap = await getDoc(userRef);
@@ -76,7 +103,13 @@ export const signInWithGoogle = async () => {
       }
       return result.user;
     }
-  } catch (error) { console.error("Error with Google sign in", error); throw error; }
+  } catch (error) { 
+    console.error("Error with Google sign in", error); 
+    if (Capacitor.isNativePlatform()) {
+      alert(`Native Google Login Failed!\n\nReason: ${error.message}\n\nMake sure your google-services.json matches your bundle ID, your SHA-1 is added in Firebase, and your Web Client ID is placed inside your strings.xml file!`);
+    }
+    throw error; 
+  }
 };
 
 export const checkGoogleRedirectResult = async () => {
@@ -118,8 +151,34 @@ export const logInWithEmail = async (email, password) => {
   } catch (error) { throw error; }
 };
 
+export const resetPassword = async (email) => {
+  try {
+    await sendPasswordResetEmail(auth, email);
+    return true;
+  } catch (error) { throw error; }
+};
+
 export const logout = async () => { await signOut(auth); };
 
+export const deleteUserAccount = async () => {
+  try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) throw new Error("No user is currently authenticated.");
+    
+    // First, wipe the physical Firestore tracking document globally
+    const userRef = doc(db, "users", currentUser.uid);
+    await deleteDoc(userRef);
+    
+    // Then violently terminate the core Authentication token
+    await deleteUser(currentUser);
+    return true;
+  } catch (err) {
+    if (err.code === 'auth/requires-recent-login') {
+      throw new Error("Security Lock: You must log out and log back in to verify your identity before deleting your account.");
+    }
+    throw err;
+  }
+};
 // ==========================================
 // 2. USER & ADMIN DATA
 // ==========================================
@@ -196,12 +255,13 @@ export const uploadImage = async (file) => {
 };
 
 export const saveVendorLogo = async (vendorName, file) => {
+  const cleanVendorName = vendorName.trim();
   const url = await uploadImage(file);
   if (url) {
     // Auto-create or update vendor document
-    await setDoc(doc(db, "vendors", vendorName), {
+    await setDoc(doc(db, "vendors", cleanVendorName), {
       logo: url,
-      name: vendorName,
+      name: cleanVendorName,
       isActive: true
     }, { merge: true });
   }
@@ -340,27 +400,34 @@ export const getAllProducts = async () => {
 
 // 🟢 UPDATED: Auto-create vendor when adding product
 export const addProduct = async (productData) => {
-  await addDoc(collection(db, "products"), { ...productData, createdAt: new Date().toISOString() });
+  const cleanData = { ...productData, createdAt: new Date().toISOString() };
+  if (cleanData.vendor) cleanData.vendor = cleanData.vendor.trim();
+  
+  await addDoc(collection(db, "products"), cleanData);
 
-  if (productData.vendor) {
+  if (cleanData.vendor) {
     // Ensure vendor exists in DB so it shows in dropdown next time
-    const vendorRef = doc(db, "vendors", productData.vendor);
+    const vendorRef = doc(db, "vendors", cleanData.vendor);
     await setDoc(vendorRef, {
-      name: productData.vendor,
-      location: [productData.location || "Irrua"],
+      name: cleanData.vendor,
+      location: [cleanData.location || "Irrua"],
       isActive: true
     }, { merge: true });
   }
 };
 
-export const updateProduct = async (id, data) => { await updateDoc(doc(db, "products", id), data); };
+export const updateProduct = async (id, data) => {  
+  const cleanData = { ...data };
+  if (cleanData.vendor) cleanData.vendor = cleanData.vendor.trim();
+  await updateDoc(doc(db, "products", id), cleanData); 
+};
 export const deleteProduct = async (id) => { await deleteDoc(doc(db, "products", id)); };
 
 // ==========================================
 // 5. ORDERS & REVIEWS
 // ==========================================
 
-export const createOrder = async (userId, cart, total, paymentMethod, walletAddress, address, transferName, phone, landmark, deliveryFee, status = 'pending', orderType = 'delivery', deliveryNote = '', customOrderId = null, customerLat = null, customerLng = null) => {
+export const createOrder = async (userId, cart, total, paymentMethod, walletAddress, address, transferName, phone, landmark, deliveryFee, status = 'pending', orderType = 'delivery', deliveryNote = '', customOrderId = null, customerLat = null, customerLng = null, promoCode = null, discount = 0, subTotal = 0) => {
   try {
     // Sanitize: Firestore doesn't allow undefined values
     const sanitize = (obj) => JSON.parse(JSON.stringify(obj, (k, v) => v === undefined ? null : v));
@@ -402,6 +469,9 @@ export const createOrder = async (userId, cart, total, paymentMethod, walletAddr
         transferName: transferName || null, status: status, orderType, createdAt: new Date().toISOString(),
         deliveryNote: deliveryNote || null,
         customerLat: customerLat || null, customerLng: customerLng || null,
+        promoCode: promoCode || null,
+        discount: discount || 0,
+        subTotal: subTotal || parseFloat(total) - (deliveryFee || 0)
       }));
     });
     return finalOrderId;
@@ -469,7 +539,7 @@ export const addReview = async (productId, userId, userName, rating, comment, or
 export const requestNotificationPermission = async (userId, role, vendorName) => {
   try {
     // 🟢 NATIVE APP (Capacitor/Android) — Use native push
-    if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+    if (Capacitor.isNativePlatform()) {
       const { PushNotifications } = await import('@capacitor/push-notifications');
 
       // Request permission
@@ -509,7 +579,10 @@ export const requestNotificationPermission = async (userId, role, vendorName) =>
       });
     }
 
-    // 🟢 WEB BROWSER — Use Firebase Cloud Messaging
+    // 🟢 WEB BROWSER — Use Firebase Cloud Messaging. 
+    // IF WE ARE NATIVE, EXECUTION WILL NOT REACH HERE BECAUSE WE AWAIT THE PROMISE AND RETURN.
+    // However, wait! The above block returns a promise. It intercepts the thread. 
+    // If it's a web browser, it gracefully falls down to here:
     if (!('Notification' in window)) return alert("Notifications not supported on this device.");
 
     const permission = await Notification.requestPermission();
@@ -538,12 +611,24 @@ export const requestNotificationPermission = async (userId, role, vendorName) =>
   }
 };
 
-export const onMessageListener = () => new Promise((resolve) => {
-  onMessage(messaging, (payload) => {
-    console.log("Foreground Message:", payload);
-    resolve(payload);
-  });
-});
+export const setupForegroundNotifications = (callback) => {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      import('@capacitor/push-notifications').then(({ PushNotifications }) => {
+        PushNotifications.addListener('pushNotificationReceived', (notification) => {
+          callback({ title: notification.title, body: notification.body });
+        });
+      });
+    } else {
+      if (!messaging) return;
+      onMessage(messaging, (payload) => {
+        callback({ title: payload.notification?.title, body: payload.notification?.body });
+      });
+    }
+  } catch (e) {
+    console.error("Foreground notification setup failed:", e);
+  }
+};
 
 export const saveStockRequest = async (item, userId, userEmail) => {
   try {
@@ -560,6 +645,24 @@ export const saveStockRequest = async (item, userId, userEmail) => {
   } catch (e) {
     console.error("Error saving stock request:", e);
     return false;
+  }
+};
+
+export const submitDispute = async (orderId, userId, userEmail, vendor, issue) => {
+  try {
+    await addDoc(collection(db, "disputes"), {
+      orderId,
+      userId,
+      userEmail: userEmail || "Anonymous",
+      vendor: vendor || "Unknown",
+      issue,
+      createdAt: new Date().toISOString(),
+      status: "open"
+    });
+    return true;
+  } catch (e) {
+    console.error("Error submitting dispute:", e);
+    throw e;
   }
 };
 
@@ -615,6 +718,43 @@ export const deleteBanner = async (id) => {
 };
 
 // ==========================================
+// 8.5. PROMO CODES
+// ==========================================
+export const getPromoCodes = async () => {
+    try {
+        const snap = await getDocs(collection(db, "promoCodes"));
+        return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (e) {
+        console.error("Error getting promo codes:", e);
+        return [];
+    }
+};
+
+export const savePromoCode = async (promoData, existingId = null) => {
+    try {
+        if (existingId) {
+            await updateDoc(doc(db, "promoCodes", existingId), { ...promoData, updatedAt: new Date().toISOString() });
+        } else {
+            await addDoc(collection(db, "promoCodes"), { ...promoData, createdAt: new Date().toISOString() });
+        }
+        return true;
+    } catch (e) {
+        console.error("Error saving promo code:", e);
+        return false;
+    }
+};
+
+export const deletePromoCode = async (id) => {
+    try {
+        await deleteDoc(doc(db, "promoCodes", id));
+        return true;
+    } catch (e) {
+        console.error("Error deleting promo code:", e);
+        return false;
+    }
+};
+
+// ==========================================
 // 9. SITE STATS (VISITORS)
 // ==========================================
 
@@ -667,3 +807,82 @@ export const saveDeliveryPricingConfig = async (config) => {
 
 export { collection, doc, query, where, onSnapshot, orderBy, limit, startAfter };
 export const seedDatabase = async () => { console.log("Seeding available."); };
+
+// 🟢 ONE-OFF MIGRATION SCRIPT: Wipe all Cloudinary Links from Database
+export const cleanCloudinaryLinks = async () => {
+    let count = 0;
+    try {
+        // 1. Clean Products
+        const prodSnap = await getDocs(collection(db, "products"));
+        for (const docSnap of prodSnap.docs) {
+            const data = docSnap.data();
+            if (data.imageUrl && data.imageUrl.includes('cloudinary')) {
+                await updateDoc(doc(db, "products", docSnap.id), { imageUrl: "" });
+                count++;
+            }
+        }
+        
+        // 2. Clean Vendors
+        const vendSnap = await getDocs(collection(db, "vendors"));
+        for (const docSnap of vendSnap.docs) {
+            const data = docSnap.data();
+            if (data.logo && data.logo.includes('cloudinary')) {
+                await updateDoc(doc(db, "vendors", docSnap.id), { logo: "" });
+                count++;
+            }
+        }
+        
+        return count;
+    } catch (e) {
+        console.error("Cloudinary Cleanup Error:", e);
+        throw e;
+    }
+};
+
+// 🟢 ONE-OFF MIGRATION SCRIPT: Safely migrate all products and orders from Old Vendor to New Vendor
+export const migrateVendorProducts = async (oldVendorName, newVendorName) => {
+    let productsMoved = 0;
+    let ordersMoved = 0;
+    
+    const cleanOld = oldVendorName.trim().toLowerCase();
+    const cleanNew = newVendorName.trim();
+    
+    try {
+        // 1. Move all Active Products
+        const prodSnap = await getDocs(collection(db, "products"));
+        for (const docSnap of prodSnap.docs) {
+            const data = docSnap.data();
+            if (data.vendor && typeof data.vendor === 'string' && data.vendor.trim().toLowerCase() === cleanOld) {
+                await updateDoc(doc(db, "products", docSnap.id), { vendor: cleanNew });
+                productsMoved++;
+            }
+        }
+
+        // 2. Move all Historical Orders
+        const ordSnap = await getDocs(collection(db, "orders"));
+        for (const docSnap of ordSnap.docs) {
+            const data = docSnap.data();
+            let orderNeedsUpdate = false;
+            
+            if (data.items && Array.isArray(data.items)) {
+                const updatedItems = data.items.map(item => {
+                    if (item.vendor && typeof item.vendor === 'string' && item.vendor.trim().toLowerCase() === cleanOld) {
+                        orderNeedsUpdate = true;
+                        return { ...item, vendor: cleanNew };
+                    }
+                    return item;
+                });
+                
+                if (orderNeedsUpdate) {
+                    await updateDoc(doc(db, "orders", docSnap.id), { items: updatedItems });
+                    ordersMoved++;
+                }
+            }
+        }
+        
+        return { productsMoved, ordersMoved };
+    } catch (e) {
+        console.error("Migration Error:", e);
+        throw e;
+    }
+};

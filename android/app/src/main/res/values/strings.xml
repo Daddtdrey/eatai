@@ -4,4 +4,5 @@
     <string name="title_activity_main">EatAi</string>
     <string name="package_name">com.eatai.app</string>
     <string name="custom_url_scheme">com.eatai.app</string>
+    <string name="server_client_id">439773552354-0j58196ppdh2lqd5480kdac11fuo4uom.apps.googleusercontent.com</string>
 </resources>

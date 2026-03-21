@@ -11,13 +11,100 @@ import { ethers } from 'ethers';
 // 🟢 IMPORTS
 import { ViewContainer, DietaryFilter, ProductCard, OrderDetailModal, Toast } from '../components/UI.jsx';
 import { ProductDetailModal } from '../components/ProductDetailModal.jsx';
+import { doc, collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
     signInWithGoogle, createOrder, getUserOrders, saveUserProfile, getUserProfile,
-    db, doc, collection, onSnapshot, query, where, saveWalletToProfile, requestNotificationPermission,
-    signUpWithEmail, logInWithEmail, saveStockRequest, getBanners
+    db, saveWalletToProfile, requestNotificationPermission,
+    signUpWithEmail, logInWithEmail, saveStockRequest, getBanners, functions, resetPassword, deleteUserAccount
 } from '../firebase.js';
+import { httpsCallable } from "firebase/functions";
 import { LOCATIONS, VENDORS_BY_LOCATION, PAYSTACK_KEY, BANK_DETAILS, calculateDeliveryFee, GEMINI_API_KEY, DELIVERY_ZONES } from '../config.js';
 import { getAutoDeliveryFee, isMultiVendorCart, DEFAULT_PRICING } from '../deliveryPricing.js';
+
+// ==========================================
+// 1.5. 🟢 USER PROFILE OVERLAY
+// ==========================================
+export const ProfileOverlay = ({ user, onClose }) => {
+    const [loading, setLoading] = useState(false);
+    const [phone, setPhone] = useState("");
+    const [address, setAddress] = useState("");
+
+    useEffect(() => {
+        if (!user) return;
+        getUserProfile(user.uid).then(data => {
+            if (data) {
+                if (data.phone) setPhone(data.phone);
+                if (data.address) setAddress(data.address);
+            }
+        });
+    }, [user]);
+
+    const handleSave = async () => {
+        setLoading(true);
+        await saveUserProfile(user.uid, { phone, address });
+        setLoading(false);
+        alert("Profile saved successfully!");
+        onClose();
+    };
+
+    const handleDelete = async () => {
+        const confirm1 = window.confirm("WARNING: You are about to permanently delete your account and all associated data. This action CANNOT be undone. Proceed?");
+        if (!confirm1) return;
+        const confirm2 = window.confirm("Are you 100% sure you want to permanently delete your account?");
+        if (!confirm2) return;
+        
+        try {
+            await deleteUserAccount();
+            window.location.reload();
+        } catch (e) {
+            alert(e.message);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-[100] flex animate-fade-in">
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
+            <div className="relative w-4/5 max-w-sm h-full bg-white dark:bg-gray-900 shadow-2xl flex flex-col pt-12 pb-6 px-6 slide-in-left">
+                <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-500 hover:text-gray-900 dark:hover:text-white">
+                    <X className="w-5 h-5" />
+                </button>
+
+                <div className="flex flex-col items-center mb-8">
+                    <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center border-4 border-white dark:border-gray-800 shadow-lg mb-4 overflow-hidden">
+                        <img src={`https://ui-avatars.com/api/?name=${user?.displayName}&background=ffedd5&color=f97316&size=128`} className="w-full h-full object-cover" />
+                    </div>
+                    <h2 className="text-xl font-black text-gray-900 dark:text-white font-[Fredoka]">{user?.displayName}</h2>
+                    <p className="text-sm text-gray-500">{user?.email}</p>
+                </div>
+
+                <div className="flex-1 space-y-5 overflow-y-auto w-full scrollbar-hide">
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Phone Number</label>
+                        <div className="relative">
+                            <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="080..." className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white p-3.5 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Default Delivery Address</label>
+                        <div className="relative">
+                            <textarea value={address} onChange={e => setAddress(e.target.value)} placeholder="Room number, Hall/Hostel..." className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white p-3.5 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 resize-none h-24" />
+                        </div>
+                    </div>
+                    
+                    <button onClick={handleSave} disabled={loading} className="w-full bg-orange-500 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-orange-600 active:scale-95 transition-all outline-none">
+                        {loading ? "Saving..." : "Save Profile"}
+                    </button>
+                    
+                    <div className="h-px w-full bg-gray-100 dark:bg-gray-800 my-6"></div>
+                    
+                    <button onClick={handleDelete} className="w-full bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400 font-bold py-3.5 rounded-xl border border-red-100 dark:border-red-500/20 hover:bg-red-100 transition-all flex items-center justify-center gap-2">
+                        <Trash2 className="w-5 h-5" /> Delete Account
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 // ==========================================
 // 1. 🟢 REDESIGNED LOGIN VIEW (Full Screen + Background)
@@ -29,6 +116,21 @@ export const LoginView = () => {
     const [name, setName] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    const handleResetPassword = async () => {
+        if (!email) return setError("Please enter your email in the field above to reset your password.");
+        setLoading(true);
+        setError('');
+        try {
+            await resetPassword(email);
+            alert('Password reset link sent! Check your email inbox.');
+        } catch (err) {
+            console.error(err);
+            setError(err.message || "Failed to send reset email.");
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -78,12 +180,26 @@ export const LoginView = () => {
                         <Lock className="absolute left-3 top-3.5 w-5 h-5 text-gray-400" />
                         <input type="password" placeholder="Password" className="w-full pl-10 p-3.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 outline-none transition-all" value={password} onChange={(e) => setPassword(e.target.value)} required />
                     </div>
+                    
+                    {!isSignUp && (
+                        <div className="flex justify-end">
+                            <button type="button" onClick={handleResetPassword} className="text-sm font-bold text-orange-400 hover:text-orange-300">
+                                Forgot Password?
+                            </button>
+                        </div>
+                    )}
 
                     {error && <p className="text-red-400 text-xs font-bold text-center bg-red-500/10 p-2 rounded-lg">{error}</p>}
 
                     <button disabled={loading} className="w-full bg-orange-500 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-orange-500/30 hover:bg-orange-600 transition-all active:scale-95 disabled:opacity-70">
                         {loading ? 'Processing...' : (isSignUp ? 'Create Account' : 'Sign In')}
                     </button>
+                    
+                    {isSignUp && (
+                        <p className="mt-4 text-xs text-gray-400 text-center font-medium px-4">
+                            By creating an account, you agree to EatAi's <a href="/terms" className="text-orange-400 hover:text-orange-300 underline underline-offset-2">Terms of Service</a> and <a href="/privacy" className="text-orange-400 hover:text-orange-300 underline underline-offset-2">Privacy Policy</a>.
+                        </p>
+                    )}
                 </form>
 
                 <div className="relative mb-6">
@@ -107,10 +223,11 @@ export const LoginView = () => {
 };
 
 // --- 2. HOME VIEW ---
-export const HomeView = ({ setCurrentView, user, setVendor, setCity }) => {
+export const HomeView = ({ setCurrentView, user, setVendor, setCity, vendorsByLocation, vendorMetadata }) => {
     const [hasPermission, setHasPermission] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [banners, setBanners] = useState([]);
+    const [showProfile, setShowProfile] = useState(false);
 
     useEffect(() => {
         if ('Notification' in window && Notification.permission === 'granted') {
@@ -169,13 +286,19 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity }) => {
         setCurrentView('market');
     };
 
-    // Mock Data for Top Vendors
-    const allTopVendors = [
-        { name: 'Big taste', img: 'https://images.unsplash.com/photo-1626200419199-391ae4be7a41?w=400&q=80', tags: 'Rice • Pasta' },
-        { name: 'DannyCook', img: 'https://images.unsplash.com/photo-1598514982205-f36b96d1e8d4?w=400&q=80', tags: 'Grill • Chicken' },
-        { name: 'Phattie ChopBox', img: 'https://images.unsplash.com/photo-1605333398741-efc88081aadd?w=400&q=80', tags: 'Snacks' },
-        { name: 'Yummy You', img: 'https://images.unsplash.com/photo-1563805042-7684c8e9e533?w=400&q=80', tags: 'Snacks' }
-    ];
+    // Dynamic Top Vendors from Firebase
+    const uniqueVendors = [...new Set(Object.values(vendorsByLocation || {}).flat())];
+
+    // Sort randomly or alphabetically, for now just show them all mapped to their logos
+    const allTopVendors = uniqueVendors.map(vName => {
+        const meta = vendorMetadata?.[vName] || {};
+        const logo = meta.logo || 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=400&q=80'; // Fallback if no logo uploaded yet
+        return {
+            name: vName,
+            img: logo,
+            tags: 'Local • Fast Food',
+        };
+    });
 
     const filteredVendors = allTopVendors.filter(v =>
         v.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -196,7 +319,7 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity }) => {
                             {user?.displayName?.split(' ')[0]} 👋
                         </h1>
                     </div>
-                    <div className="w-10 h-10 bg-orange-100 dark:bg-gray-800 rounded-full flex items-center justify-center border-2 border-white dark:border-gray-700 shadow-sm overflow-hidden">
+                    <div onClick={() => setShowProfile(true)} className="w-10 h-10 cursor-pointer active:scale-95 transition-transform bg-orange-100 dark:bg-gray-800 rounded-full flex items-center justify-center border-2 border-white dark:border-gray-700 shadow-sm overflow-hidden">
                         <img src={`https://ui-avatars.com/api/?name=${user?.displayName}&background=ffedd5&color=f97316`} alt="User" />
                     </div>
                 </div>
@@ -328,6 +451,10 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity }) => {
                 </div>
 
             </div>
+
+            {/* OVERLAYS MOUNTED AT ROOT TO PREVENT CSS CLIPPING */}
+            {showProfile && <ProfileOverlay user={user} onClose={() => setShowProfile(false)} />}
+
         </div>
     );
 };
@@ -338,221 +465,270 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
 
     return (
         <ViewContainer title="Select Location" showBack onBack={() => setCurrentView('home')}>
-                <div className="grid grid-cols-1 gap-3 mt-2">
-                    {displayLocations.map((loc) => (
-                        <button key={loc} onClick={() => { setCity(loc); setCurrentView('vendors'); }} className="group p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 flex items-center justify-between hover:border-orange-500 hover:shadow-lg hover:shadow-orange-500/10 transition-all active:scale-[0.98]">
-                            <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-orange-50 dark:bg-gray-800 rounded-full flex items-center justify-center text-2xl group-hover:scale-110 transition-transform">📍</div>
-                                <div className="text-left">
-                                    <h3 className="text-lg font-black text-gray-800 dark:text-white font-[Fredoka]">{loc}</h3>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Browse vendors</p>
-                                </div>
+            <div className="grid grid-cols-1 gap-3 mt-2">
+                {displayLocations.map((loc) => (
+                    <button key={loc} onClick={() => { setCity(loc); setCurrentView('vendors'); }} className="group p-5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 flex items-center justify-between hover:border-orange-500 hover:shadow-lg hover:shadow-orange-500/10 transition-all active:scale-[0.98]">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-orange-50 dark:bg-gray-800 rounded-full flex items-center justify-center text-2xl group-hover:scale-110 transition-transform">📍</div>
+                            <div className="text-left">
+                                <h3 className="text-lg font-black text-gray-800 dark:text-white font-[Fredoka]">{loc}</h3>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Browse vendors</p>
                             </div>
-                            <ArrowLeft className="w-5 h-5 text-gray-300 group-hover:text-orange-500 rotate-180 transition-colors" />
-                        </button>
-                    ))}
-                </div>
-            </ViewContainer>
-            );
+                        </div>
+                        <ArrowLeft className="w-5 h-5 text-gray-300 group-hover:text-orange-500 rotate-180 transition-colors" />
+                    </button>
+                ))}
+            </div>
+        </ViewContainer>
+    );
 };
 
-            // --- 4. VENDOR SELECTOR ---
-            export const VendorSelectionView = ({city, setVendor, setCurrentView, vendorLogos, vendorsByLocation}) => {
+// --- 4. VENDOR SELECTOR ---
+export const VendorSelectionView = ({ city, setVendor, setCurrentView, vendorLogos, vendorsByLocation }) => {
     const vendors = (vendorsByLocation && vendorsByLocation[city]) ? vendorsByLocation[city] : (VENDORS_BY_LOCATION[city] || []);
 
-            return (
-            <ViewContainer title={`${city} Vendors`} showBack onBack={() => setCurrentView('location')}>
-                <div className="grid grid-cols-1 gap-3 mt-2">
-                    {vendors.map((vendor) => (
-                        <button key={vendor} onClick={() => { setVendor(vendor); setCurrentView('market'); }} className="group p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 flex items-center justify-between hover:border-orange-500 hover:shadow-lg hover:shadow-orange-500/10 transition-all active:scale-[0.98]">
-                            <div className="flex items-center gap-4">
-                                <div className="w-14 h-14 rounded-xl flex items-center justify-center overflow-hidden bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-1">
-                                    {vendorLogos && vendorLogos[vendor] ? (
-                                        <img src={vendorLogos[vendor]} alt={vendor} className="w-full h-full object-cover rounded-lg" />
-                                    ) : (
-                                        <Store className="w-6 h-6 text-orange-400" />
-                                    )}
-                                </div>
-                                <div className="text-left">
-                                    <h3 className="text-lg font-bold text-gray-800 dark:text-white font-[Fredoka]">{vendor}</h3>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">View Menu</p>
-                                </div>
+    return (
+        <ViewContainer title={`${city} Vendors`} showBack onBack={() => setCurrentView('location')}>
+            <div className="grid grid-cols-1 gap-3 mt-2">
+                {vendors.map((vendor) => (
+                    <button key={vendor} onClick={() => { setVendor(vendor); setCurrentView('market'); }} className="group p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 flex items-center justify-between hover:border-orange-500 hover:shadow-lg hover:shadow-orange-500/10 transition-all active:scale-[0.98]">
+                        <div className="flex items-center gap-4">
+                            <div className="w-14 h-14 rounded-xl flex items-center justify-center overflow-hidden bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-1">
+                                {vendorLogos && vendorLogos[vendor] ? (
+                                    <img src={vendorLogos[vendor]} alt={vendor} className="w-full h-full object-cover rounded-lg" />
+                                ) : (
+                                    <Store className="w-6 h-6 text-orange-400" />
+                                )}
                             </div>
-                            <ArrowLeft className="w-5 h-5 text-gray-300 group-hover:text-orange-500 rotate-180 transition-colors" />
-                        </button>
-                    ))}
-                </div>
-            </ViewContainer>
-            );
+                            <div className="text-left">
+                                <h3 className="text-lg font-bold text-gray-800 dark:text-white font-[Fredoka]">{vendor}</h3>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">View Menu</p>
+                            </div>
+                        </div>
+                        <ArrowLeft className="w-5 h-5 text-gray-300 group-hover:text-orange-500 rotate-180 transition-colors" />
+                    </button>
+                ))}
+            </div>
+        </ViewContainer>
+    );
 };
 
-            // 🟢 UPDATED: Market Product Card with Modal Support
-            const MarketProductCard = ({item, onInteract, isOpen, onNotify}) => {
+// 🟢 UPDATED: Market Product Card with Modal Support
+const MarketProductCard = ({ item, onInteract, isOpen, onNotify }) => {
     const [showModal, setShowModal] = useState(false);
-            const [imgError, setImgError] = useState(false);
+    const [imgError, setImgError] = useState(false);
 
-            const stock = item.stock || 0;
-            const isSoldOut = stock === 0;
+    const stock = item.stock || 0;
+    const isSoldOut = stock === 0;
     const isLowStock = stock > 0 && stock < 10;
 
     const handleOpenModal = () => {
         if (!isOpen) {
-                alert("Vendor is currently closed.");
+            alert("Vendor is currently closed.");
             return;
         }
-            setShowModal(true);
+        setShowModal(true);
     };
 
     const handleAddToCart = (product, sideName, sidePrice) => {
-                onInteract(product, sideName, sidePrice);
+        onInteract(product, sideName, sidePrice);
     };
 
-            return (
-            <>
-                {/* Simplified Product Card - No inline quantity/sides selectors */}
-                <div className={`relative bg-white dark:bg-gray-900 rounded-3xl border-2 border-orange-50/50 dark:border-gray-800 p-3 flex gap-4 transition-all active:scale-[0.99] shadow-sm hover:shadow-md cursor-pointer group ${isSoldOut ? 'opacity-75' : ''}`} onClick={handleOpenModal}>
-                    <div className="w-28 h-28 bg-gray-100 dark:bg-gray-800 rounded-2xl overflow-hidden shrink-0 relative shadow-inner">
-                        {item.imageUrl && !imgError ? (
-                            <img src={item.imageUrl} alt={item.name} className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 ${isSoldOut ? 'grayscale' : ''}`} onError={() => setImgError(true)} />
-                        ) : (
-                            <div className="flex items-center justify-center h-full text-4xl"><span>{item.image || '🥘'}</span></div>
-                        )}
-                        {isSoldOut && (
-                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                                <span className="text-white text-[10px] font-black uppercase bg-red-500 px-2 py-1 rounded-lg transform -rotate-12">Sold Out</span>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex-1 flex flex-col justify-between py-1 min-w-0">
-                        <div>
-                            <div className="flex justify-between items-start">
-                                <h4 className="font-bold text-gray-900 dark:text-white text-base leading-tight line-clamp-2 font-[Fredoka]">{item.name}</h4>
-                                {isSoldOut && (
-                                    <button onClick={(e) => { e.stopPropagation(); onNotify(item); }} className="p-2 bg-orange-100 dark:bg-gray-800 rounded-xl text-orange-600 hover:bg-orange-200 active:scale-90 transition-all">
-                                        <BellRing className="w-4 h-4" />
-                                    </button>
-                                )}
-                            </div>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{item.desc || "Fresh & tasty."}</p>
-                            {isLowStock && !isSoldOut && (
-                                <span className="text-[10px] text-orange-600 font-bold mt-1 block animate-pulse">🔥 Only {stock} left!</span>
-                            )}
+    return (
+        <>
+            {/* Simplified Product Card - No inline quantity/sides selectors */}
+            <div className={`relative bg-white dark:bg-gray-900 rounded-3xl border-2 border-orange-50/50 dark:border-gray-800 p-3 flex gap-4 transition-all active:scale-[0.99] shadow-sm hover:shadow-md cursor-pointer group ${isSoldOut ? 'opacity-75' : ''}`} onClick={handleOpenModal}>
+                <div className="w-28 h-28 bg-gray-100 dark:bg-gray-800 rounded-2xl overflow-hidden shrink-0 relative shadow-inner">
+                    {item.imageUrl && !imgError ? (
+                        <img src={item.imageUrl} alt={item.name} className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 ${isSoldOut ? 'grayscale' : ''}`} onError={() => setImgError(true)} />
+                    ) : (
+                        <div className="flex items-center justify-center h-full text-4xl"><span>{item.image || '🥘'}</span></div>
+                    )}
+                    {isSoldOut && (
+                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                            <span className="text-white text-[10px] font-black uppercase bg-red-500 px-2 py-1 rounded-lg transform -rotate-12">Sold Out</span>
                         </div>
-
-                        <div className="flex items-center justify-between mt-2">
-                            <span className="font-black text-gray-900 dark:text-white text-xl">₦{item.price.toLocaleString()}</span>
-
-                            <button
-                                onClick={(e) => { e.stopPropagation(); handleOpenModal(); }}
-                                disabled={isSoldOut}
-                                className={`h-10 px-5 rounded-2xl font-bold text-xs flex items-center gap-1 transition-all shadow-lg ${isSoldOut
-                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed shadow-none'
-                                    : 'bg-orange-500 text-white hover:bg-orange-600 shadow-orange-500/30 active:scale-90'
-                                    }`}
-                            >
-                                {isSoldOut ? "Closed" : "View"}
-                            </button>
-                        </div>
-                    </div>
+                    )}
                 </div>
 
-                {/* Product Detail Modal */}
-                <ProductDetailModal
-                    isOpen={showModal}
-                    product={item}
-                    onClose={() => setShowModal(false)}
-                    onAddToCart={handleAddToCart}
-                    isVendorOpen={isOpen}
-                />
-            </>
-            );
+                <div className="flex-1 flex flex-col justify-between py-1 min-w-0">
+                    <div>
+                        <div className="flex justify-between items-start">
+                            <h4 className="font-bold text-gray-900 dark:text-white text-base leading-tight line-clamp-2 font-[Fredoka]">{item.name}</h4>
+                            {isSoldOut && (
+                                <button onClick={(e) => { e.stopPropagation(); onNotify(item); }} className="p-2 bg-orange-100 dark:bg-gray-800 rounded-xl text-orange-600 hover:bg-orange-200 active:scale-90 transition-all">
+                                    <BellRing className="w-4 h-4" />
+                                </button>
+                            )}
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{item.desc || "Fresh & tasty."}</p>
+                        {isLowStock && !isSoldOut && (
+                            <span className="text-[10px] text-orange-600 font-bold mt-1 block animate-pulse">🔥 Only {stock} left!</span>
+                        )}
+                    </div>
+
+                    <div className="flex items-center justify-between mt-2">
+                        <span className="font-black text-gray-900 dark:text-white text-xl">₦{item.price.toLocaleString()}</span>
+
+                        <button
+                            onClick={(e) => { e.stopPropagation(); handleOpenModal(); }}
+                            disabled={isSoldOut}
+                            className={`h-10 px-5 rounded-2xl font-bold text-xs flex items-center gap-1 transition-all shadow-lg ${isSoldOut
+                                ? 'bg-gray-100 text-gray-400 cursor-not-allowed shadow-none'
+                                : 'bg-orange-500 text-white hover:bg-orange-600 shadow-orange-500/30 active:scale-90'
+                                }`}
+                        >
+                            {isSoldOut ? "Closed" : "View"}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Product Detail Modal */}
+            <ProductDetailModal
+                isOpen={showModal}
+                product={item}
+                onClose={() => setShowModal(false)}
+                onAddToCart={handleAddToCart}
+                isVendorOpen={isOpen}
+            />
+        </>
+    );
 };
 
 
 
-            // --- 5. MARKET VIEW (WITH OPENING HOURS CHECK) ---
-            export const MarketView = ({setCurrentView, addToCart, marketData, loadingData, city, vendor, user, vendorMetadata, onLoadMore, hasMore, isLoadingMore}) => {
+// --- 5. MARKET VIEW (WITH OPENING HOURS CHECK) ---
+export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData, city, vendor, user, vendorMetadata, onLoadMore, hasMore, isLoadingMore }) => {
     const [category, setCategory] = useState('All');
-            // 🟢 CHECK HOURS
-            const currentHour = new Date().getHours();
-            const currentMinute = new Date().getMinutes();
-            const currentTime = currentHour + (currentMinute / 60);
+    // 🟢 CHECK HOURS
+    const currentHour = new Date().getHours();
+    const currentMinute = new Date().getMinutes();
+    const currentTime = currentHour + (currentMinute / 60);
 
-            const vendorInfo = vendorMetadata?.[vendor] || { };
-            const openTime = parseFloat(vendorInfo.openTime?.replace(':', '.') || "8.00");
-            const closeTime = parseFloat(vendorInfo.closeTime?.replace(':', '.') || "22.00");
+    const vendorInfo = vendorMetadata?.[vendor] || {};
+    const openTime = parseFloat(vendorInfo.openTime?.replace(':', '.') || "8.00");
+    const closeTime = parseFloat(vendorInfo.closeTime?.replace(':', '.') || "22.00");
 
-    const isOpen = currentTime >= openTime && currentTime < closeTime;
+    // 🟢 Must be within operating hours AND manually accepting orders
+    const isWithinHours = currentTime >= openTime && currentTime < closeTime;
+    const isManuallyOffline = vendorInfo.isAcceptingOrders === false;
+    const isOpen = isWithinHours && !isManuallyOffline;
 
     const handleNotify = async (item) => {
         if (!user) return alert("Please login first.");
-            try {
+        try {
             const success = await saveStockRequest(item, user.uid, user.email);
             if (success) alert(`🔔 Alert set for ${item.name}!`);
-        } catch (e) {console.error(e); }
+        } catch (e) { console.error(e); }
     };
 
-            if (loadingData && marketData.length === 0) return <div className="flex justify-center items-center h-full"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div>;
+    if (loadingData && marketData.length === 0) return <div className="flex justify-center items-center h-full"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div>;
 
     const items = marketData.filter(p => {
         const productVendor = p.vendor ? p.vendor.toLowerCase() : "";
-            const selectedVendor = vendor ? vendor.toLowerCase() : "";
-            const vendorMatch = productVendor.includes(selectedVendor) || selectedVendor.includes(productVendor);
-            const categoryMatch = category === 'All' ? true : p.category === category;
-            if (vendorMatch) return categoryMatch;
-            const locationMatch = !p.location || (p.location && city && p.location.toLowerCase() === city.toLowerCase());
-            return locationMatch && vendorMatch && categoryMatch;
+        const selectedVendor = vendor ? vendor.toLowerCase() : "";
+        const vendorMatch = productVendor.includes(selectedVendor) || selectedVendor.includes(productVendor);
+        const categoryMatch = category === 'All' ? true : p.category === category;
+        if (vendorMatch) return categoryMatch;
+        const locationMatch = !p.location || (p.location && city && p.location.toLowerCase() === city.toLowerCase());
+        return locationMatch && vendorMatch && categoryMatch;
     });
 
-            const categories = [{id: 'All', label: 'All', icon: null }, {id: 'fullMeal', label: 'Meals', icon: ShoppingBag }, {id: 'cravings', label: 'Cravings', icon: Heart }, {id: 'pregnancy', label: 'Pregnancy', icon: Baby }];
+    const categories = [{ id: 'All', label: 'All', icon: null }, { id: 'fullMeal', label: 'Meals', icon: ShoppingBag }, { id: 'cravings', label: 'Cravings', icon: Heart }, { id: 'pregnancy', label: 'Pregnancy', icon: Baby }];
 
-            return (
-            <ViewContainer title={`${vendor} Menu`} showBack onBack={() => setCurrentView('vendors')}>
-                {/* 🟢 CLOSED BANNER */}
-                {!isOpen && (
-                    <div className="bg-red-500 text-white p-3 rounded-xl mb-4 flex items-center justify-between shadow-md">
-                        <div className="flex items-center gap-2">
-                            <Clock className="w-5 h-5" />
-                            <span className="font-bold text-sm">Closed (Opens {vendorInfo.openTime || "8:00"})</span>
-                        </div>
-                    </div>
-                )}
-
-                <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide px-1">{categories.map(cat => (<DietaryFilter key={cat.id} icon={cat.icon} label={cat.label} active={category === cat.id} onClick={() => setCategory(cat.id)} />))}</div>
-
-                <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide min-h-0">
-                    <div className="grid grid-cols-1 gap-4 pb-4">{items.map((item) => (
-                        <MarketProductCard
-                            key={item.id}
-                            item={item}
-                            onInteract={isOpen ? addToCart : () => alert("Vendor is currently closed.")}
-                            isOpen={isOpen}
-                            onNotify={handleNotify}
-                        />
-                    ))}
-                        {hasMore && (
-                            <button onClick={onLoadMore} disabled={isLoadingMore} className="w-full py-3 bg-gray-100 dark:bg-gray-800 text-gray-500 font-bold rounded-xl mt-4 active:scale-95">
-                                {isLoadingMore ? "Loading..." : "Load More Food 🍲"}
-                            </button>
-                        )}
+    return (
+        <ViewContainer title={`${vendor} Menu`} showBack onBack={() => setCurrentView('vendors')}>
+            {/* 🟢 CLOSED BANNER */}
+            {!isOpen && (
+                <div className="bg-red-500 text-white p-3 rounded-xl mb-4 flex items-center justify-between shadow-md">
+                    <div className="flex items-center gap-2">
+                        <Clock className="w-5 h-5" />
+                        <span className="font-bold text-sm">
+                            {isManuallyOffline ? "Store is currently Offline" : `Closed (Opens ${vendorInfo.openTime || "8:00"})`}
+                        </span>
                     </div>
                 </div>
-            </ViewContainer>
-            );
+            )}
+
+            <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide px-1">{categories.map(cat => (<DietaryFilter key={cat.id} icon={cat.icon} label={cat.label} active={category === cat.id} onClick={() => setCategory(cat.id)} />))}</div>
+
+            <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide min-h-0">
+                <div className="grid grid-cols-1 gap-4 pb-4">{items.map((item) => (
+                    <MarketProductCard
+                        key={item.id}
+                        item={item}
+                        onInteract={isOpen ? addToCart : () => alert("Vendor is currently closed.")}
+                        isOpen={isOpen}
+                        onNotify={handleNotify}
+                    />
+                ))}
+                    {hasMore && (
+                        <button onClick={onLoadMore} disabled={isLoadingMore} className="w-full py-3 bg-gray-100 dark:bg-gray-800 text-gray-500 font-bold rounded-xl mt-4 active:scale-95">
+                            {isLoadingMore ? "Loading..." : "Load More Food 🍲"}
+                        </button>
+                    )}
+                </div>
+            </div>
+        </ViewContainer>
+    );
 };
 
-            // --- 6. ORDERS VIEW ---
-            export const OrdersView = ({setCurrentView, user}) => {
+// --- 5.5. DISPUTE MODAL ---
+export const DisputeModal = ({ order, user, onClose }) => {
+    const [issue, setIssue] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+
+    const handleSubmit = async () => {
+        if (!issue.trim()) return alert("Please describe your issue.");
+        setSubmitting(true);
+        try {
+            const { submitDispute } = await import('../firebase.js');
+            const vendor = order.items && order.items.length > 0 ? order.items[0].vendor : "Unknown";
+            await submitDispute(order.id, user.uid, user.email, vendor, issue);
+            alert("Dispute submitted. Support will contact you shortly.");
+            onClose();
+        } catch (e) {
+            console.error(e);
+            alert("Failed to submit dispute.");
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in px-6">
+            <div className="bg-white dark:bg-gray-900 w-full max-w-sm rounded-[2rem] p-6 shadow-2xl relative slide-up">
+                <button onClick={onClose} className="absolute top-4 right-4 bg-gray-100 dark:bg-gray-800 p-2 rounded-full text-gray-400 hover:text-gray-900 dark:hover:text-white active:scale-90 transition-all"><X className="w-5 h-5" /></button>
+                <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mb-4"><AlertTriangle className="w-6 h-6 text-red-500" /></div>
+                <h2 className="text-xl font-black text-gray-900 dark:text-white font-[Fredoka] mb-2">Get Help With Order</h2>
+                <p className="text-xs text-gray-500 mb-4 font-bold font-mono">#{order.id.slice(0, 6)}</p>
+                <textarea
+                    value={issue}
+                    onChange={(e) => setIssue(e.target.value)}
+                    placeholder="Describe the issue (e.g., missing items, food spilled, vendor closed)..."
+                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white p-3.5 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 resize-none h-32 text-sm mb-4"
+                />
+                <button onClick={handleSubmit} disabled={submitting} className="w-full bg-red-500 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-red-600 active:scale-95 transition-all text-sm outline-none">
+                    {submitting ? "Submitting..." : "Submit to Live Support"}
+                </button>
+            </div>
+        </div>
+    );
+};
+
+// --- 6. ORDERS VIEW ---
+export const OrdersView = ({ setCurrentView, user }) => {
     const [orders, setOrders] = useState([]);
-            const [loading, setLoading] = useState(true);
-            const [selectedOrder, setSelectedOrder] = useState(null);
-            const [retryingOrderId, setRetryingOrderId] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [selectedOrder, setSelectedOrder] = useState(null);
+    const [retryingOrderId, setRetryingOrderId] = useState(null);
+    const [disputingOrder, setDisputingOrder] = useState(null);
 
     useEffect(() => {
         const q = query(collection(db, "orders"), where("userId", "==", user.uid));
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            const data = snapshot.docs.map(d => ({id: d.id, ...d.data() }));
+            const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
             setOrders(data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
             setLoading(false);
         });
@@ -561,24 +737,24 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
 
     const handleRateProduct = async (productId, rating, comment, orderId) => {
         if (!user) return;
-            try {
-            const {addReview} = await import('../firebase.js');
+        try {
+            const { addReview } = await import('../firebase.js');
             await addReview(productId, user.uid, user.displayName, rating, comment, orderId);
-        } catch (e) {console.error(e); }
+        } catch (e) { console.error(e); }
     };
 
-            // 🟢 RETRY: Reopen Paystack for a pending order
-            const RetryPayButton = ({order}) => {
+    // 🟢 RETRY: Reopen Paystack for a pending order
+    const RetryPayButton = ({ order }) => {
         const retryRef = `${order.id}_retry_${Date.now()}`;
-            const initRetryPayment = usePaystackPayment({
-                reference: retryRef,
+        const initRetryPayment = usePaystackPayment({
+            reference: retryRef,
             email: user?.email,
             amount: order.total * 100,
             publicKey: PAYSTACK_KEY,
-            metadata: {orderId: order.id },
+            metadata: { orderId: order.id },
         });
 
-            return (
+        return (
             <button
                 onClick={(e) => {
                     e.stopPropagation();
@@ -596,149 +772,157 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
                     <><CreditCard className="w-3 h-3" /> Pay Now — ₦{order.total.toLocaleString()}</>
                 )}
             </button>
-            );
+        );
     };
 
-            return (
-            <ViewContainer title="My Orders" showBack onBack={() => setCurrentView('home')}>
-                {selectedOrder && <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} onRate={handleRateProduct} />}
-                {loading ? <div className="flex justify-center p-10"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div> : orders.length === 0 ? <div className="text-center mt-10 text-gray-400"><Package className="w-16 h-16 mx-auto mb-4 opacity-20" /><p>No orders yet.</p></div> : <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide space-y-3">{orders.map(order => (<div key={order.id} className="bg-white dark:bg-gray-900 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
-                    <div onClick={() => setSelectedOrder(order)} className="cursor-pointer active:scale-95 transition-transform">
-                        <div className="flex justify-between mb-2"><span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-wider ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : order.status === 'picked_up' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>{order.status.replace('_', ' ')}</span><span className="text-xs text-gray-400 font-mono">#{order.id.slice(0, 6)}</span></div>
-                        <div className="flex justify-between items-end"><div><p className="font-bold dark:text-white text-sm">{order.items.length} Items</p><p className="text-xs text-gray-500">{new Date(order.createdAt).toLocaleDateString()}</p></div><div className="text-right"><p className="font-black text-orange-500 text-lg">₦{order.total.toLocaleString()}</p><p className="text-[10px] text-gray-400 font-medium">Tap for details</p></div></div>
-                    </div>
-                    {/* 🟢 RETRY: Show Pay Now button for pending Paystack orders */}
-                    {order.status === 'pending' && order.paymentMethod === 'paystack' && (
-                        <RetryPayButton order={order} />
-                    )}
-                </div>))}</div>}
-            </ViewContainer>
-            );
+    return (
+        <ViewContainer title="My Orders" showBack onBack={() => setCurrentView('home')}>
+            {selectedOrder && <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} onRate={handleRateProduct} />}
+            {loading ? <div className="flex justify-center p-10"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div> : orders.length === 0 ? <div className="text-center mt-10 text-gray-400"><Package className="w-16 h-16 mx-auto mb-4 opacity-20" /><p>No orders yet.</p></div> : <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide space-y-3">{orders.map(order => (<div key={order.id} className="bg-white dark:bg-gray-900 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
+                <div onClick={() => setSelectedOrder(order)} className="cursor-pointer active:scale-95 transition-transform">
+                    <div className="flex justify-between mb-2"><span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-wider ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : order.status === 'picked_up' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>{order.status.replace('_', ' ')}</span><span className="text-xs text-gray-400 font-mono">#{order.id.slice(0, 6)}</span></div>
+                    <div className="flex justify-between items-end"><div><p className="font-bold dark:text-white text-sm">{order.items.length} Items</p><p className="text-xs text-gray-500">{new Date(order.createdAt).toLocaleDateString()}</p></div><div className="text-right"><p className="font-black text-orange-500 text-lg">₦{order.total.toLocaleString()}</p><p className="text-[10px] text-gray-400 font-medium">Tap for details</p></div></div>
+                </div>
+                {/* 🟢 RETRY: Show Pay Now button for pending Paystack orders */}
+                {order.status === 'pending' && order.paymentMethod === 'paystack' && (
+                    <RetryPayButton order={order} />
+                )}
+                {/* 🟢 DISPUTE: Show Get Help button for all active or past non-dead orders */}
+                {order.status !== 'pending' && (
+                    <button onClick={(e) => { e.stopPropagation(); setDisputingOrder(order); }} className="w-full mt-2 bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400 border border-red-100 dark:border-red-900/30 py-2 rounded-xl text-xs font-bold shadow-sm hover:bg-red-100 active:scale-95 transition-all flex items-center justify-center gap-1">
+                        <AlertTriangle className="w-3 h-3 text-red-500" /> Report Issue / Get Help
+                    </button>
+                )}
+            </div>))}</div>}
+            
+            {disputingOrder && <DisputeModal order={disputingOrder} user={user} onClose={() => setDisputingOrder(null)} />}
+        </ViewContainer>
+    );
 };
 
-            // --- 7. WALLET VIEW ---
-            export const WalletView = ({setCurrentView, user, setGlobalWallet}) => {
+// --- 7. WALLET VIEW ---
+export const WalletView = ({ setCurrentView, user, setGlobalWallet }) => {
     const [wallet, setWallet] = useState(null);
-            const [showPrivate, setShowPrivate] = useState(false);
-            const [isLoading, setIsLoading] = useState(false);
-            const [error, setError] = useState(null);
+    const [showPrivate, setShowPrivate] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
         try {
             const saved = localStorage.getItem(`eatai_wallet_${user.uid}`);
             if (saved) {
                 const parsed = JSON.parse(saved);
-            setWallet(parsed);
-            setGlobalWallet(parsed);
+                setWallet(parsed);
+                setGlobalWallet(parsed);
             }
-        } catch (e) {console.error("Wallet load error:", e); }
+        } catch (e) { console.error("Wallet load error:", e); }
     }, [user]);
 
     const createWallet = async () => {
-                setIsLoading(true);
-            setError(null);
-            try {
-                await new Promise(resolve => setTimeout(resolve, 100)); // UI Breath
+        setIsLoading(true);
+        setError(null);
+        try {
+            await new Promise(resolve => setTimeout(resolve, 100)); // UI Breath
             const w = ethers.Wallet.createRandom();
-            const wd = {address: w.address, privateKey: w.privateKey, mnemonic: w.mnemonic?.phrase };
+            const wd = { address: w.address, privateKey: w.privateKey, mnemonic: w.mnemonic?.phrase };
             localStorage.setItem(`eatai_wallet_${user.uid}`, JSON.stringify(wd));
             await saveWalletToProfile(user.uid, w.address);
             setWallet(wd);
             setGlobalWallet(wd);
         } catch (e) {
-                console.error(e);
+            console.error(e);
             setError("Could not create wallet. Try again.");
         } finally {
-                setIsLoading(false);
+            setIsLoading(false);
         }
     };
-    const copyToClipboard = (text) => {navigator.clipboard.writeText(text); alert("Copied!"); };
+    const copyToClipboard = (text) => { navigator.clipboard.writeText(text); alert("Copied!"); };
 
-            return (
-            <ViewContainer title="Crypto Kitchen" showBack onBack={() => setCurrentView('home')}>
-                <div className="flex flex-col items-center justify-center space-y-6 mt-10">
-                    {!wallet ? (
-                        <>
-                            <div className="w-24 h-24 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center"><Wallet className="w-12 h-12 text-indigo-600" /></div>
-                            <p className="text-gray-500 dark:text-gray-400 text-center max-w-xs font-medium">Generate a secure wallet linked to {user.displayName}</p>
-                            {error && <p className="text-red-500 text-sm">{error}</p>}
-                            <button onClick={createWallet} disabled={isLoading} className="bg-indigo-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg flex items-center gap-2 hover:bg-indigo-700 transition-colors">{isLoading ? <Sparkles className="animate-spin" /> : <Plus />} Generate Wallet</button>
-                        </>
-                    ) : (
-                        <div className="w-full space-y-4">
-                            <div className="bg-indigo-600 p-6 rounded-2xl text-white shadow-xl">
-                                <p className="text-xs opacity-70 mb-1">Your Address (Tap to Copy)</p>
-                                <code onClick={() => copyToClipboard(wallet.address)} className="text-sm break-all cursor-pointer hover:underline">{wallet.address}</code>
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold text-gray-500 dark:text-gray-400">Private Key (Keep Safe!)</label>
-                                <div className="relative">
-                                    <div className={`p-3 bg-gray-100 dark:bg-gray-800 rounded-xl text-xs break-all text-gray-700 dark:text-gray-300 ${!showPrivate ? 'blur-sm' : ''}`}>{wallet.privateKey}</div>
-                                    <button onClick={() => setShowPrivate(!showPrivate)} className="absolute top-2 right-2 text-gray-500 hover:text-indigo-600"><Eye className="w-4 h-4" /></button>
-                                </div>
-                            </div>
-                            <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 text-xs rounded-xl border border-yellow-100 dark:border-yellow-800">
-                                ⚠️ <b>Warning:</b> This wallet is stored locally. If you clear your browser cache, it will be lost unless you save your Private Key.
+    return (
+        <ViewContainer title="Crypto Kitchen" showBack onBack={() => setCurrentView('home')}>
+            <div className="flex flex-col items-center justify-center space-y-6 mt-10">
+                {!wallet ? (
+                    <>
+                        <div className="w-24 h-24 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center"><Wallet className="w-12 h-12 text-indigo-600" /></div>
+                        <p className="text-gray-500 dark:text-gray-400 text-center max-w-xs font-medium">Generate a secure wallet linked to {user.displayName}</p>
+                        {error && <p className="text-red-500 text-sm">{error}</p>}
+                        <button onClick={createWallet} disabled={isLoading} className="bg-indigo-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg flex items-center gap-2 hover:bg-indigo-700 transition-colors">{isLoading ? <Sparkles className="animate-spin" /> : <Plus />} Generate Wallet</button>
+                    </>
+                ) : (
+                    <div className="w-full space-y-4">
+                        <div className="bg-indigo-600 p-6 rounded-2xl text-white shadow-xl">
+                            <p className="text-xs opacity-70 mb-1">Your Address (Tap to Copy)</p>
+                            <code onClick={() => copyToClipboard(wallet.address)} className="text-sm break-all cursor-pointer hover:underline">{wallet.address}</code>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-gray-500 dark:text-gray-400">Private Key (Keep Safe!)</label>
+                            <div className="relative">
+                                <div className={`p-3 bg-gray-100 dark:bg-gray-800 rounded-xl text-xs break-all text-gray-700 dark:text-gray-300 ${!showPrivate ? 'blur-sm' : ''}`}>{wallet.privateKey}</div>
+                                <button onClick={() => setShowPrivate(!showPrivate)} className="absolute top-2 right-2 text-gray-500 hover:text-indigo-600"><Eye className="w-4 h-4" /></button>
                             </div>
                         </div>
-                    )}
-                </div>
-            </ViewContainer>
-            );
+                        <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 text-xs rounded-xl border border-yellow-100 dark:border-yellow-800">
+                            ⚠️ <b>Warning:</b> This wallet is stored locally. If you clear your browser cache, it will be lost unless you save your Private Key.
+                        </div>
+                    </div>
+                )}
+            </div>
+        </ViewContainer>
+    );
 };
 
-            export const DeciderView = ({ingredients, setIngredients, generateRecipes, isThinking, aiRecipe, setCurrentView, activeFilters, toggleFilter}) => (
-            <ViewContainer title="AI Fridge Raider" showBack onBack={() => setCurrentView('home')}>
-                <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide">
-                    <div className="bg-orange-50 dark:bg-gray-800 p-6 rounded-3xl mb-6 border border-orange-100 dark:border-gray-700 transition-colors">
-                        <div className="flex flex-wrap gap-2 mb-4"><DietaryFilter icon={Leaf} label="Vegan" active={activeFilters.includes('Vegan')} onClick={() => toggleFilter('Vegan')} /><DietaryFilter icon={Beef} label="High Protein" active={activeFilters.includes('High Protein')} onClick={() => toggleFilter('High Protein')} /><DietaryFilter icon={Zap} label="Keto" active={activeFilters.includes('Keto')} onClick={() => toggleFilter('Keto')} /><DietaryFilter icon={Cookie} label="Low Carb" active={activeFilters.includes('Low Carb')} onClick={() => toggleFilter('Low Carb')} /></div>
-                        <label className="block text-orange-800 dark:text-orange-300 font-semibold mb-3">What's in your kitchen?</label>
-                        <textarea autoFocus value={ingredients} onChange={(e) => setIngredients(e.target.value)} placeholder="e.g., 2 eggs, stale bread, milk..." className="w-full p-4 rounded-xl border-2 border-orange-200 dark:border-gray-600 focus:border-orange-500 dark:focus:border-orange-500 focus:ring-0 bg-white dark:bg-gray-700 dark:text-white h-32 resize-none transition-all placeholder-gray-400" />
-                        <button onClick={generateRecipes} disabled={isThinking || !ingredients.trim()} className="w-full mt-4 bg-orange-500 hover:bg-orange-600 text-white font-bold py-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20">{isThinking ? <><Sparkles className="w-5 h-5 animate-spin" /><span>Thinking...</span></> : <><Sparkles className="w-5 h-5" /><span>Invent Recipe</span></>}</button>
-                    </div>
-                    {aiRecipe && <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-700 animate-slide-up whitespace-pre-wrap"><h3 className="text-xl font-bold text-orange-600 dark:text-orange-400 mb-4">Chef EatAi Suggests:</h3><div className="text-gray-700 dark:text-gray-300 leading-loose font-medium whitespace-pre-line">{aiRecipe}</div></div>}
-                </div>
-            </ViewContainer>
-            );
+export const DeciderView = ({ ingredients, setIngredients, generateRecipes, isThinking, aiRecipe, setCurrentView, activeFilters, toggleFilter }) => (
+    <ViewContainer title="AI Fridge Raider" showBack onBack={() => setCurrentView('home')}>
+        <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide">
+            <div className="bg-orange-50 dark:bg-gray-800 p-6 rounded-3xl mb-6 border border-orange-100 dark:border-gray-700 transition-colors">
+                <div className="flex flex-wrap gap-2 mb-4"><DietaryFilter icon={Leaf} label="Vegan" active={activeFilters.includes('Vegan')} onClick={() => toggleFilter('Vegan')} /><DietaryFilter icon={Beef} label="High Protein" active={activeFilters.includes('High Protein')} onClick={() => toggleFilter('High Protein')} /><DietaryFilter icon={Zap} label="Keto" active={activeFilters.includes('Keto')} onClick={() => toggleFilter('Keto')} /><DietaryFilter icon={Cookie} label="Low Carb" active={activeFilters.includes('Low Carb')} onClick={() => toggleFilter('Low Carb')} /></div>
+                <label className="block text-orange-800 dark:text-orange-300 font-semibold mb-3">What's in your kitchen?</label>
+                <textarea autoFocus value={ingredients} onChange={(e) => setIngredients(e.target.value)} placeholder="e.g., 2 eggs, stale bread, milk..." className="w-full p-4 rounded-xl border-2 border-orange-200 dark:border-gray-600 focus:border-orange-500 dark:focus:border-orange-500 focus:ring-0 bg-white dark:bg-gray-700 dark:text-white h-32 resize-none transition-all placeholder-gray-400" />
+                <button onClick={generateRecipes} disabled={isThinking || !ingredients.trim()} className="w-full mt-4 bg-orange-500 hover:bg-orange-600 text-white font-bold py-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20">{isThinking ? <><Sparkles className="w-5 h-5 animate-spin" /><span>Thinking...</span></> : <><Sparkles className="w-5 h-5" /><span>Invent Recipe</span></>}</button>
+            </div>
+            {aiRecipe && <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-lg border border-gray-100 dark:border-gray-700 animate-slide-up whitespace-pre-wrap"><h3 className="text-xl font-bold text-orange-600 dark:text-orange-400 mb-4">Chef EatAi Suggests:</h3><div className="text-gray-700 dark:text-gray-300 leading-loose font-medium whitespace-pre-line">{aiRecipe}</div></div>}
+        </div>
+    </ViewContainer>
+);
 
-            // --- 9. CHECKOUT MODALS (WITH AUTO DISTANCE PRICING) ---
-            export const PaymentModal = ({isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city, vendorMetadata, vendor, deliveryPricingConfig, globalCustomerCoords}) => {
+// --- 9. CHECKOUT MODALS (WITH AUTO DISTANCE PRICING) ---
+export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart, globalWallet, onSuccess, city, vendorMetadata, vendor, deliveryPricingConfig, globalCustomerCoords }) => {
     if (!isOpen) return null;
-            const [processing, setProcessing] = useState(false);
-            const [paymentStage, setPaymentStage] = useState(null);
-            const [orderType, setOrderType] = useState('delivery');
-            const [form, setForm] = useState({transferName: '', address: '', phone: '', landmark: '', deliveryAreaName: '' });
-            const [activeMethod, setActiveMethod] = useState(paymentMethod || 'paystack');
+    const [processing, setProcessing] = useState(false);
+    const [paymentStage, setPaymentStage] = useState(null);
+    const [orderType, setOrderType] = useState('delivery');
+    const [form, setForm] = useState({ transferName: '', address: '', phone: '', landmark: '', deliveryAreaName: '' });
+    const [activeMethod, setActiveMethod] = useState(paymentMethod || 'paystack');
 
-            // 🟢 GPS State
-            const [gpsState, setGpsState] = useState('idle'); // idle | loading | success | denied
-            const [autoFeeResult, setAutoFeeResult] = useState(null); // result from getAutoDeliveryFee
-            const [detectedAddress, setDetectedAddress] = useState(null); // human-readable address from Nominatim
-            const [vendorHasGPS, setVendorHasGPS] = useState(true); // false if vendor hasn't set their location
+    // 🟢 GPS State
+    const [gpsState, setGpsState] = useState('idle'); // idle | loading | success | denied
+    const [autoFeeResult, setAutoFeeResult] = useState(null); // result from getAutoDeliveryFee
+    const [detectedAddress, setDetectedAddress] = useState(null); // human-readable address from Nominatim
+    const [vendorHasGPS, setVendorHasGPS] = useState(true); // false if vendor hasn't set their location
 
-            // 🟢 Address autocomplete state (used when GPS is missing or user prefers typing)
-            const [customerCoords, setCustomerCoords] = useState(globalCustomerCoords); // local override
-            const [showAddressSearch, setShowAddressSearch] = useState(!globalCustomerCoords);
-            const [addrQuery, setAddrQuery] = useState('');
-            const [addrSuggestions, setAddrSuggestions] = useState([]);
-            const [addrSearching, setAddrSearching] = useState(false);
-            const addrDebounceRef = useRef(null);
-
+    // 🟢 Address autocomplete state (used when GPS is missing or user prefers typing)
+    const [customerCoords, setCustomerCoords] = useState(globalCustomerCoords); // local override
+    
+    // 🟢 Promo Code State
+    const [promoCode, setPromoCode] = useState('');
+    const [appliedPromo, setAppliedPromo] = useState(null);
+    const [secureTotals, setSecureTotals] = useState(null);
+    const [calculatingTotals, setCalculatingTotals] = useState(false);
 
     // 🟢 Reverse geocode coords using OpenStreetMap Nominatim (free, no API key)
     const reverseGeocode = async (lat, lng) => {
         try {
             const resp = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
-            {headers: {'Accept-Language': 'en' } }
+                `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
+                { headers: { 'Accept-Language': 'en' } }
             );
             const data = await resp.json();
             // Build a short readable address from the response
-            const a = data.address || { };
+            const a = data.address || {};
             const parts = [
-            a.road || a.pedestrian || a.footway,
-            a.suburb || a.neighbourhood || a.quarter,
-            a.city || a.town || a.village || a.county,
+                a.road || a.pedestrian || a.footway,
+                a.suburb || a.neighbourhood || a.quarter,
+                a.city || a.town || a.village || a.county,
             ].filter(Boolean);
             return parts.join(', ') || data.display_name?.split(',').slice(0, 3).join(',') || 'Location detected';
         } catch {
@@ -752,7 +936,7 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
         if (!coordsToUse || detectedAddress) return;
         reverseGeocode(coordsToUse.lat, coordsToUse.lng).then(addr => {
             setDetectedAddress(addr);
-            setForm(prev => ({...prev, address: prev.address || addr }));
+            setForm(prev => ({ ...prev, address: prev.address || addr }));
         });
     }, [customerCoords, globalCustomerCoords, detectedAddress]);
 
@@ -760,99 +944,84 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
     useEffect(() => {
         const coordsToUse = customerCoords || globalCustomerCoords;
         if (!coordsToUse) return;
-            const meta = vendorMetadata?.[vendor];
-            if (meta?.lat && meta?.lng) {
-                setVendorHasGPS(true);
+        const meta = vendorMetadata?.[vendor];
+        if (meta?.lat && meta?.lng) {
+            setVendorHasGPS(true);
             const result = getAutoDeliveryFee(meta.lat, meta.lng, coordsToUse.lat, coordsToUse.lng, cart, deliveryPricingConfig);
             setAutoFeeResult(result);
         } else {
-                // Vendor has no GPS set — use base fee and warn
-                setVendorHasGPS(false);
-            setAutoFeeResult({fee: deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee, distance: null, isAuto: false });
+            // Vendor has no GPS set — use base fee and warn
+            setVendorHasGPS(false);
+            setAutoFeeResult({ fee: deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee, distance: null, isAuto: false });
         }
     }, [customerCoords, globalCustomerCoords, vendor, vendorMetadata, cart, deliveryPricingConfig]);
 
-    // 🟢 Address autocomplete: search Nominatim with debounce as user types
-    const handleAddrQueryChange = (val) => {
-                setAddrQuery(val);
-            setAddrSuggestions([]);
-            if (addrDebounceRef.current) clearTimeout(addrDebounceRef.current);
-            if (!val.trim() || val.length < 3) return;
-        addrDebounceRef.current = setTimeout(async () => {
-                setAddrSearching(true);
-            try {
-                const resp = await fetch(
-            `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(val)}&limit=5&countrycodes=ng&addressdetails=1`,
-            {headers: {'Accept-Language': 'en' } }
-            );
-            const results = await resp.json();
-            setAddrSuggestions(results);
-            } catch {setAddrSuggestions([]); }
-            setAddrSearching(false);
-        }, 500);
-    };
-
-    // When user picks a suggestion from autocomplete
-    const handlePickAddressSuggestion = (result) => {
-        const lat = parseFloat(result.lat);
-            const lng = parseFloat(result.lon);
-            const label = result.display_name?.split(',').slice(0, 3).join(', ');
-            setCustomerCoords({lat, lng});
-            setDetectedAddress(label);
-            setGpsState('success');
-            setShowAddressSearch(false);
-            setAddrQuery('');
-            setAddrSuggestions([]);
-        setForm(prev => ({...prev, address: prev.address || label }));
-    };
-
-    // 🟢 GPS Capture + reverse geocode for manual button
+    // 🟢 Delivery fee: auto distance if coords captured, else base fee
     const handleUseGPS = () => {
         if (!navigator.geolocation) return alert("Geolocation not supported on this device.");
-            setGpsState('loading');
-            setShowAddressSearch(false);
-            navigator.geolocation.getCurrentPosition(
+        setGpsState('loading');
+        setShowAddressSearch(false);
+        navigator.geolocation.getCurrentPosition(
             async (pos) => {
-                const {latitude: lat, longitude: lng } = pos.coords;
-            setCustomerCoords({lat, lng});
-            setGpsState('success');
-            // Reverse geocode in background
-            const addr = await reverseGeocode(lat, lng);
-            setDetectedAddress(addr);
+                const { latitude: lat, longitude: lng } = pos.coords;
+                setCustomerCoords({ lat, lng });
+                setGpsState('success');
+                // Reverse geocode in background
+                const addr = await reverseGeocode(lat, lng);
+                setDetectedAddress(addr);
                 // Auto-fill the address field if it's empty
-                setForm(prev => ({...prev, address: prev.address || addr }));
+                setForm(prev => ({ ...prev, address: prev.address || addr }));
             },
             () => {
                 setGpsState('denied');
-            setShowAddressSearch(true); // auto-open address search on denial
             },
-            {enableHighAccuracy: true, timeout: 10000 }
-            );
+            { enableHighAccuracy: true, timeout: 10000 }
+        );
     };
 
-            // 🟢 Delivery fee: auto distance if coords captured, else base fee
-            const activeCoords = customerCoords || globalCustomerCoords;
-            const deliveryFee = orderType === 'pickup' ? 0
-            : activeCoords ? (autoFeeResult?.fee ?? (deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee))
+    // 🟢 Delivery fee: auto distance if coords captured, else base fee
+    const activeCoords = customerCoords || globalCustomerCoords;
+    const estimatedDeliveryFee = orderType === 'pickup' ? 0
+        : activeCoords ? (autoFeeResult?.fee ?? (deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee))
             : (deliveryPricingConfig?.baseFee || DEFAULT_PRICING.baseFee);
 
-            const grandTotal = total + deliveryFee;
+    const estimatedTotal = total + estimatedDeliveryFee;
+    const displayGrandTotal = secureTotals ? secureTotals.grandTotal : estimatedTotal;
 
     // Pre-generate unique order ID
     const [orderId] = useState(() => `eatai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
 
-            const initializePayment = usePaystackPayment({
-                reference: orderId,
-            email: user?.email,
-            amount: grandTotal * 100,
-            publicKey: PAYSTACK_KEY,
+    const initializePayment = usePaystackPayment({
+        reference: orderId,
+        email: user?.email,
+        amount: displayGrandTotal * 100, // Syncs with derived state
+        publicKey: PAYSTACK_KEY,
     });
+
+    const handleApplyPromoCode = async () => {
+        if (!promoCode.trim()) return;
+        if (orderType === 'delivery' && !activeCoords) return alert("Grant GPS access first to calculate delivery and discounts.");
+        setCalculatingTotals(true);
+        try {
+            const calcFunc = httpsCallable(functions, 'calculateCheckoutTotals');
+            const result = await calcFunc({ cart, customerCoords: activeCoords || null, deliveryType: orderType, promoCode: promoCode.trim() });
+            setSecureTotals(result.data);
+            setAppliedPromo(result.data.appliedPromo);
+            alert(`Promo applied! ₦${result.data.discount.toLocaleString()} off.`);
+        } catch (e) {
+            alert(e.message);
+            setAppliedPromo(null);
+            setSecureTotals(null);
+        } finally {
+            setCalculatingTotals(false);
+        }
+    };
 
     useEffect(() => {
         if (user && isOpen) {
-                getUserProfile(user.uid).then(data => {
-                    if (data) setForm(prev => ({ ...prev, address: data.address || '', phone: data.phone || '', landmark: data.landmark || '' }));
-                });
+            getUserProfile(user.uid).then(data => {
+                if (data) setForm(prev => ({ ...prev, address: data.address || '', phone: data.phone || '', landmark: data.landmark || '' }));
+            });
         }
     }, [user, isOpen]);
 
@@ -869,228 +1038,274 @@ export const LocationSelectionView = ({ setCity, setCurrentView, locations }) =>
 
     const handlePayment = async (method = activeMethod) => {
         if (orderType === 'delivery' && (!form.address || !form.phone)) return alert("Please enter your delivery address and phone number.");
-            const activeCoords = customerCoords || globalCustomerCoords;
-            if (orderType === 'delivery' && !activeCoords) return alert("We need your location to calculate delivery fees correctly. Provide your area above.");
+        const activeCoords = customerCoords || globalCustomerCoords;
+        if (orderType === 'delivery' && !activeCoords) return alert("We need your location to calculate delivery fees correctly. Provide your area above.");
 
-            setProcessing(true);
-            const customerLat = activeCoords?.lat || null;
-            const customerLng = activeCoords?.lng || null;
+        setProcessing(true);
+        try {
+            // SECURE MATH VERIFICATION
+            const calcFunc = httpsCallable(functions, 'calculateCheckoutTotals');
+            const result = await calcFunc({
+                cart, customerCoords: activeCoords || null, deliveryType: orderType, promoCode: appliedPromo || null
+            });
 
-            try {
+            const finalGrandTotal = result.data.grandTotal;
+            const finalDeliveryFee = result.data.deliveryFee;
+
+            // Safety check against frontend estimated total if no promo was applied manually
+            if (!appliedPromo && Math.abs(finalGrandTotal - estimatedTotal) > 10) {
+                 setSecureTotals(result.data);
+                 setProcessing(false);
+                 return alert(`Prices or delivery fees have updated from the server. Your new total is ₦${finalGrandTotal.toLocaleString()}. Please review and click Pay Now again.`);
+            }
+
             if (method === 'paystack') {
                 await createOrder(
-                    user.uid, cart, grandTotal, method,
+                    user.uid, cart, finalGrandTotal, method,
                     globalWallet?.address, form.address, "Paystack Online",
-                    form.phone, form.landmark, deliveryFee,
-                    'pending', orderType, '', orderId, customerLat, customerLng
+                    form.phone, form.landmark, finalDeliveryFee,
+                    'pending', orderType, '', orderId, activeCoords?.lat, activeCoords?.lng, appliedPromo,
+                    result.data.discount, result.data.subTotal
                 );
-            await saveUserProfile(user.uid, {address: form.address, phone: form.phone, landmark: form.landmark });
-            setProcessing(false);
-            setPaymentStage('waiting');
-            initializePayment(
-                    (response) => {console.log('✅ Paystack payment complete:', response); },
-                    () => {setPaymentStage('closed'); }
-            );
+                await saveUserProfile(user.uid, { address: form.address, phone: form.phone, landmark: form.landmark });
+                setProcessing(false);
+                setPaymentStage('waiting');
+                initializePayment(
+                    (response) => { console.log('✅ Paystack payment complete:', response); },
+                    () => { setPaymentStage('closed'); }
+                );
             } else {
                 await new Promise(r => setTimeout(r, 1500));
-            await createOrder(user.uid, cart, grandTotal, method, globalWallet?.address, form.address, "Paystack Online", form.phone, form.landmark, deliveryFee, 'pending', orderType, '', null, customerLat, customerLng);
-            await saveUserProfile(user.uid, {address: form.address, phone: form.phone, landmark: form.landmark });
-            setProcessing(false);
-            onSuccess();
+                await createOrder(
+                    user.uid, cart, finalGrandTotal, method, globalWallet?.address, form.address, "Paystack Online", 
+                    form.phone, form.landmark, finalDeliveryFee, 'pending', orderType, '', null, activeCoords?.lat, activeCoords?.lng, appliedPromo,
+                    result.data.discount, result.data.subTotal
+                );
+                await saveUserProfile(user.uid, { address: form.address, phone: form.phone, landmark: form.landmark });
+                setProcessing(false);
+                onSuccess();
             }
         } catch (e) {
-                setProcessing(false);
+            setProcessing(false);
             alert("Error placing order: " + e.message);
         }
     };
 
-            return (
-            <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
-                <div className="bg-white dark:bg-gray-900 w-full max-w-lg p-6 rounded-t-3xl md:rounded-3xl shadow-2xl relative max-h-[90vh] overflow-y-auto">
-                    <button onClick={onClose} className="absolute top-4 right-4 z-10"><X className="w-5 h-5" /></button>
+    return (
+        <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white dark:bg-gray-900 w-full max-w-lg p-6 rounded-t-3xl md:rounded-3xl shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                <button onClick={onClose} className="absolute top-4 right-4 z-10"><X className="w-5 h-5" /></button>
 
-                    {/* ===== PAYMENT STATUS OVERLAY ===== */}
-                    {paymentStage && (
-                        <div className="absolute inset-0 z-20 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center p-8 text-center">
-                            {paymentStage === 'waiting' && (
-                                <>
-                                    <div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                                    <h3 className="text-xl font-black dark:text-white mb-2">Completing Payment...</h3>
-                                    <p className="text-sm text-gray-500 mb-1">Complete the payment in the Paystack window.</p>
-                                    <p className="text-xs text-gray-400 mb-6">This screen updates automatically once confirmed.</p>
-                                    <button onClick={() => setPaymentStage('closed')} className="text-xs text-gray-400 underline hover:text-orange-500 transition-colors">I'll pay later</button>
-                                </>
-                            )}
-                            {paymentStage === 'confirmed' && (
-                                <>
-                                    <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-4">
-                                        <CheckCircle className="w-10 h-10 text-green-600" />
-                                    </div>
-                                    <h3 className="text-xl font-black text-green-700 mb-2">Payment Confirmed! ✅</h3>
-                                    <p className="text-sm text-gray-500">Your order is on its way. Redirecting...</p>
-                                </>
-                            )}
-                            {paymentStage === 'closed' && (
-                                <>
-                                    <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
-                                        <AlertTriangle className="w-10 h-10 text-yellow-600" />
-                                    </div>
-                                    <h3 className="text-lg font-black dark:text-white mb-2">Payment Not Completed</h3>
-                                    <p className="text-sm text-gray-500 mb-4">You closed the payment window. Your order is saved as pending — you can pay anytime from <b>My Orders</b>.</p>
-                                    <div className="space-y-2 w-full max-w-xs">
-                                        <button onClick={() => { setPaymentStage('waiting'); initializePayment((r) => console.log('✅ Retry:', r), () => setPaymentStage('closed')); }} className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold shadow hover:bg-orange-600 transition-colors">Try Again</button>
-                                        <button onClick={onClose} className="w-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors">Go to My Orders</button>
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    )}
+                {/* ===== PAYMENT STATUS OVERLAY ===== */}
+                {paymentStage && (
+                    <div className="absolute inset-0 z-20 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center p-8 text-center">
+                        {paymentStage === 'waiting' && (
+                            <>
+                                <div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                                <h3 className="text-xl font-black dark:text-white mb-2">Completing Payment...</h3>
+                                <p className="text-sm text-gray-500 mb-1">Complete the payment in the Paystack window.</p>
+                                <p className="text-xs text-gray-400 mb-6">This screen updates automatically once confirmed.</p>
+                                <button onClick={() => setPaymentStage('closed')} className="text-xs text-gray-400 underline hover:text-orange-500 transition-colors">I'll pay later</button>
+                            </>
+                        )}
+                        {paymentStage === 'confirmed' && (
+                            <>
+                                <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-4">
+                                    <CheckCircle className="w-10 h-10 text-green-600" />
+                                </div>
+                                <h3 className="text-xl font-black text-green-700 mb-2">Payment Confirmed! ✅</h3>
+                                <p className="text-sm text-gray-500">Your order is on its way. Redirecting...</p>
+                            </>
+                        )}
+                        {paymentStage === 'closed' && (
+                            <>
+                                <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
+                                    <AlertTriangle className="w-10 h-10 text-yellow-600" />
+                                </div>
+                                <h3 className="text-lg font-black dark:text-white mb-2">Payment Not Completed</h3>
+                                <p className="text-sm text-gray-500 mb-4">You closed the payment window. Your order is saved as pending — you can pay anytime from <b>My Orders</b>.</p>
+                                <div className="space-y-2 w-full max-w-xs">
+                                    <button onClick={() => { setPaymentStage('waiting'); initializePayment((r) => console.log('✅ Retry:', r), () => setPaymentStage('closed')); }} className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold shadow hover:bg-orange-600 transition-colors">Try Again</button>
+                                    <button onClick={onClose} className="w-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors">Go to My Orders</button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                )}
 
-                    <h3 className="text-xl font-bold text-center mb-4 dark:text-white">Complete Order</h3>
+                <h3 className="text-xl font-bold text-center mb-4 dark:text-white">Complete Order</h3>
 
-                    <div className="space-y-3">
-                        {orderType === 'delivery' && (
-                            <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
+                <div className="space-y-3">
+                    {orderType === 'delivery' && (
+                        <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
 
-                                {/* 🟢 GPS SECTION */}
-                                <div>
-                                    <div className="flex justify-between items-center mb-2">
-                                        <label className="text-xs font-bold text-gray-500">Delivery Location</label>
-                                        {gpsState !== 'success' && !(globalCustomerCoords && !showAddressSearch) && (
-                                            <button
-                                                onClick={handleUseGPS}
-                                                disabled={gpsState === 'loading'}
-                                                className="text-xs text-orange-500 font-bold flex items-center gap-1 disabled:opacity-50"
-                                            >
-                                                <Navigation className="w-3 h-3" />
-                                                {gpsState === 'loading' ? 'Getting location...' : 'Use My GPS'}
-                                            </button>
-                                        )}
-                                    </div>
-
-                                    {/* GPS SUCCESS: show auto fee */}
-                                    {((globalCustomerCoords && !showAddressSearch) || gpsState === 'success') && autoFeeResult ? (
-                                        <div className="space-y-2">
-                                            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-3">
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
-                                                    <span className="text-xs font-bold text-green-700 dark:text-green-400">Your Location Used</span>
-                                                    <button onClick={() => { setGpsState('idle'); setCustomerCoords(null); setShowAddressSearch(true); setAutoFeeResult(null); setDetectedAddress(null); }} className="ml-auto text-xs text-gray-400 underline">Change</button>
-                                                </div>
-                                                {detectedAddress && (
-                                                    <p className="text-xs text-gray-600 dark:text-gray-300 font-medium pl-6">{detectedAddress}</p>
-                                                )}
-                                                {autoFeeResult.distance !== null && (
-                                                    <p className="text-xs text-gray-400 pl-6 mt-0.5">~{autoFeeResult.distance} km from vendor</p>
-                                                )}
-                                            </div>
-                                            {/* Vendor GPS missing warning */}
-                                            {!vendorHasGPS && (
-                                                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-700 dark:text-yellow-400">
-                                                    ⚠️ <b>Flat rate applied.</b> The vendor hasn't set their pickup location yet, so we can't calculate the exact distance. Delivery fee: <b>₦{deliveryFee.toLocaleString()}</b>
-                                                </div>
-                                            )}
-                                            {vendorHasGPS && (
-                                                <p className="text-sm font-black text-orange-500 px-1">Delivery Fee: ₦{deliveryFee.toLocaleString()}
-                                                    {autoFeeResult.isMultiVendor && <span className="text-[10px] text-gray-400 font-normal ml-1">(+₦350 multi-vendor)</span>}
-                                                </p>
-                                            )}
-                                        </div>
-                                    ) : null}
-
-                                    {/* GPS DENIED or user lacks global coords: address autocomplete */}
-                                    {(gpsState === 'denied' || showAddressSearch) && gpsState !== 'success' && (
-                                        <div className="space-y-2">
-                                            {!globalCustomerCoords && !showAddressSearch && gpsState !== 'denied' && (
-                                                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 rounded-xl p-3 text-xs text-red-600 mb-2">
-                                                    ⚠️ We need your location to calculate delivery. Tap GPS, or type a landmark below.
-                                                </div>
-                                            )}
-                                            <div className="relative">
-                                                <input
-                                                    type="text"
-                                                    placeholder="Type street, area or landmark..."
-                                                    value={addrQuery}
-                                                    onChange={e => handleAddrQueryChange(e.target.value)}
-                                                    className="w-full p-2 pr-8 rounded-xl border dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
-                                                    autoFocus={showAddressSearch}
-                                                />
-                                                {addrSearching && <span className="absolute right-2 top-2 text-xs text-orange-400">⏳</span>}
-                                            </div>
-                                            {addrSuggestions.length > 0 && (
-                                                <div className="bg-white dark:bg-gray-700 rounded-xl border dark:border-gray-600 overflow-hidden shadow-lg">
-                                                    {addrSuggestions.map((r, i) => (
-                                                        <button
-                                                            key={i}
-                                                            onClick={() => handlePickAddressSuggestion(r)}
-                                                            className="w-full text-left px-3 py-2 text-xs hover:bg-orange-50 dark:hover:bg-gray-600 border-b dark:border-gray-600 last:border-0 transition-colors"
-                                                        >
-                                                            <span className="font-bold text-orange-500">📍 </span>
-                                                            {r.display_name?.split(',').slice(0, 4).join(', ')}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            {addrQuery.length >= 3 && !addrSearching && addrSuggestions.length === 0 && (
-                                                <p className="text-xs text-gray-400">No suggestions. Try a nearby landmark or area name.</p>
-                                            )}
-                                            {gpsState === 'denied' && (
-                                                <button onClick={handleUseGPS} className="text-xs text-orange-500 underline">Try GPS again</button>
-                                            )}
-                                        </div>
+                            {/* 🟢 GPS SECTION */}
+                            <div>
+                                <div className="flex justify-between items-center mb-2">
+                                    <label className="text-xs font-bold text-gray-500">Delivery Location</label>
+                                    {gpsState !== 'success' && !globalCustomerCoords && (
+                                        <button
+                                            onClick={handleUseGPS}
+                                            disabled={gpsState === 'loading'}
+                                            className="text-xs text-orange-500 font-bold flex items-center gap-1 disabled:opacity-50"
+                                        >
+                                            <Navigation className="w-3 h-3" />
+                                            {gpsState === 'loading' ? 'Getting location...' : 'Use My GPS'}
+                                        </button>
                                     )}
                                 </div>
 
-                                <div><label className="text-xs font-bold text-gray-500">Street Address</label><input className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="e.g. 12 Market Road" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></div>
-                            </div>
-                        )}
-                        <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
-                            <div className="flex gap-2"><div className="flex-1"><label className="text-xs font-bold text-gray-500">Phone</label><input type="tel" className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="080..." value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div></div>
-                        </div>
-                    </div>
-
-                    {/* ORDER SUMMARY */}
-                    <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
-                        <p className="text-[10px] text-gray-400 font-bold uppercase mb-2">Order Summary</p>
-                        <div className="space-y-2 max-h-40 overflow-y-auto scrollbar-hide">
-                            {cart.map((item, i) => {
-                                const addonsTotal = item.selectedAddons ? item.selectedAddons.reduce((s, a) => s + (a.price || 0), 0) : 0;
-                                return (
-                                    <div key={i} className="flex justify-between items-start text-sm border-b border-gray-200 dark:border-gray-700 last:border-0 pb-2 last:pb-0">
-                                        <div className="flex gap-2 items-start">
-                                            <div className="flex-shrink-0 w-10 h-10 bg-white dark:bg-gray-700 rounded-lg flex items-center justify-center text-lg overflow-hidden">
-                                                {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" /> : item.image}
+                                {/* GPS SUCCESS: show auto fee */}
+                                {(globalCustomerCoords || gpsState === 'success') && autoFeeResult ? (
+                                    <div className="space-y-2">
+                                        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-3">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                                                <span className="text-xs font-bold text-green-700 dark:text-green-400">Your Location Used</span>
+                                                <button onClick={() => { setGpsState('idle'); setCustomerCoords(null); setShowAddressSearch(true); setAutoFeeResult(null); setDetectedAddress(null); }} className="ml-auto text-xs text-gray-400 underline">Change</button>
                                             </div>
-                                            <div>
-                                                <p className="font-bold text-gray-800 dark:text-white text-xs">{item.name}</p>
-                                                {item.selectedAddons && item.selectedAddons.length > 0 && (
-                                                    <p className="text-[10px] text-orange-500 font-bold">+ {item.selectedAddons.map(a => `${a.name} (₦${a.price})`).join(', ')}</p>
-                                                )}
-                                            </div>
+                                            {detectedAddress && (
+                                                <p className="text-xs text-gray-600 dark:text-gray-300 font-medium pl-6">{detectedAddress}</p>
+                                            )}
+                                            {autoFeeResult.distance !== null && (
+                                                <p className="text-xs text-gray-400 pl-6 mt-0.5">~{autoFeeResult.distance} km from vendor</p>
+                                            )}
                                         </div>
-                                        <span className="font-bold text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">₦{(item.price + addonsTotal).toLocaleString()}</span>
+                                        {/* Vendor GPS missing warning */}
+                                        {!vendorHasGPS && (
+                                            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-700 dark:text-yellow-400">
+                                                ⚠️ <b>Flat rate applied.</b> The vendor hasn't set their pickup location yet, so we can't calculate the exact distance. Estimated fee: <b>₦{estimatedDeliveryFee.toLocaleString()}</b>
+                                            </div>
+                                        )}
+                                        {vendorHasGPS && (
+                                            <p className="text-sm font-black text-orange-500 px-1">Delivery Fee: ₦{secureTotals ? secureTotals.deliveryFee.toLocaleString() : estimatedDeliveryFee.toLocaleString()}
+                                                {autoFeeResult.isMultiVendor && <span className="text-[10px] text-gray-400 font-normal ml-1">(+₦350 multi-vendor)</span>}
+                                            </p>
+                                        )}
                                     </div>
-                                );
-                            })}
+                                ) : null}
+
+                                {/* GPS DENIED or missing: strict enforcement */}
+                                {(gpsState === 'denied' || (!globalCustomerCoords && gpsState !== 'success')) && (
+                                    <div className="space-y-4 text-center p-4 bg-gray-50 border rounded-xl dark:bg-gray-800 dark:border-gray-700 mb-4 mt-2">
+                                        <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 text-red-500 rounded-full flex items-center justify-center mx-auto mb-2">
+                                            <Navigation className="w-6 h-6" />
+                                        </div>
+                                        <h4 className="font-bold text-gray-800 dark:text-gray-200">Location Required</h4>
+                                        <p className="text-xs text-gray-500">We strictly need your GPS location to calculate accurate delivery pricing. Please allow location access to continue.</p>
+                                        <button onClick={handleUseGPS} disabled={gpsState === 'loading'} className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-bold shadow-lg disabled:opacity-50 transition">
+                                            {gpsState === 'loading' ? 'Locating...' : 'Grant GPS Access'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div><label className="text-xs font-bold text-gray-500">Street Address</label><input className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="e.g. 12 Market Road" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></div>
+                        </div>
+                    )}
+                    <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-3">
+                        <div className="flex gap-2"><div className="flex-1"><label className="text-xs font-bold text-gray-500">Phone</label><input type="tel" className="w-full p-2 rounded border dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="080..." value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div></div>
+                    </div>
+                </div>
+
+                {/* ORDER SUMMARY */}
+                <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
+                    <p className="text-[10px] text-gray-400 font-bold uppercase mb-2">Order Summary</p>
+                    <div className="space-y-2 max-h-40 overflow-y-auto scrollbar-hide">
+                        {cart.map((item, i) => {
+                            const addonsTotal = item.selectedAddons ? item.selectedAddons.reduce((s, a) => s + (a.price || 0), 0) : 0;
+                            return (
+                                <div key={i} className="flex justify-between items-start text-sm border-b border-gray-200 dark:border-gray-700 last:border-0 pb-2 last:pb-0">
+                                    <div className="flex gap-2 items-start">
+                                        <div className="flex-shrink-0 w-10 h-10 bg-white dark:bg-gray-700 rounded-lg flex items-center justify-center text-lg overflow-hidden">
+                                            {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" /> : item.image}
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-gray-800 dark:text-white text-xs">{item.name}</p>
+                                            {item.selectedAddons && item.selectedAddons.length > 0 && (
+                                                <p className="text-[10px] text-orange-500 font-bold">+ {item.selectedAddons.map(a => `${a.name} (₦${a.price})`).join(', ')}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <span className="font-bold text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">₦{(item.price + addonsTotal).toLocaleString()}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* ORDER BREAKDOWN */}
+                <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 space-y-2">
+                    <div className="flex justify-between text-xs text-gray-500 font-medium">
+                        <span>Food Subtotal</span>
+                        <span>₦{(secureTotals ? secureTotals.subTotal : total).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-500 font-medium">
+                        <span>Delivery Fee</span>
+                        <span>₦{(secureTotals ? secureTotals.deliveryFee : estimatedDeliveryFee).toLocaleString()}</span>
+                    </div>
+                    {secureTotals?.discount > 0 && (
+                        <div className="flex justify-between text-xs text-green-600 font-bold bg-green-50 dark:bg-green-900/20 p-2 rounded-lg -mx-2">
+                            <span>Promo Applies to Food ({appliedPromo})</span>
+                            <span>- ₦{secureTotals.discount.toLocaleString()}</span>
+                        </div>
+                    )}
+                    <div className="flex justify-between items-center mt-2 pt-3 border-t dark:border-gray-700">
+                        <div className="text-sm font-bold text-gray-700 dark:text-gray-300">Grand Total:</div>
+                        <div className="text-2xl font-black text-orange-600">
+                            ₦{displayGrandTotal.toLocaleString()}
                         </div>
                     </div>
-
-                    <div className="flex justify-between items-center mt-6 pt-4 border-t dark:border-gray-700"><div className="text-sm text-gray-500">Total:</div><div className="text-2xl font-black text-green-600">₦{grandTotal.toLocaleString()}</div></div>
-
-                    <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-1.5 rounded-xl flex gap-1">
-                        <button onClick={() => setActiveMethod('paystack')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'paystack' ? 'bg-white dark:bg-gray-700 shadow text-green-600 dark:text-white' : 'text-gray-400'}`}>
-                            <div className="flex items-center justify-center gap-2"><CreditCard className="w-4 h-4" /> Paystack</div>
-                        </button>
-                    </div>
-
-                    {activeMethod === 'paystack' ? (
-                        (orderType === 'delivery' && (!form.address || (!customerCoords && !globalCustomerCoords))) ?
-                            <button disabled className="w-full mt-4 bg-gray-300 dark:bg-gray-700 text-white font-bold py-4 rounded-xl cursor-not-allowed">Enter Delivery Details</button> :
-                            <button onClick={() => handlePayment('paystack')} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Pay Now'}</button>
-                    ) : (<button onClick={() => handlePayment('crypto')} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Confirm Crypto Transfer'}</button>)}
                 </div>
+
+                {/* PROMO CODE SECTION */}
+                <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
+                    <label className="text-xs font-bold text-gray-500 mb-2 block flex justify-between">
+                        <span>Have a Promo Code?</span>
+                        {appliedPromo && <span className="text-green-500">Applied! (-20%)</span>}
+                    </label>
+                    <div className="flex gap-2">
+                        <input 
+                            type="text" 
+                            className="flex-1 p-2 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white uppercase font-bold text-sm disabled:opacity-50" 
+                            placeholder="E.g. CELEB20" 
+                            value={promoCode} 
+                            disabled={appliedPromo}
+                            onChange={(e) => setPromoCode(e.target.value.toUpperCase())} 
+                        />
+                        {!appliedPromo ? (
+                            <button 
+                                className="bg-orange-500 text-white px-4 rounded-lg font-bold text-xs shadow hover:bg-orange-600 disabled:opacity-50" 
+                                onClick={handleApplyPromoCode}
+                                disabled={calculatingTotals}
+                            >
+                                {calculatingTotals ? '...' : 'Apply'}
+                            </button>
+                        ) : (
+                            <button 
+                                className="bg-red-500 text-white px-4 rounded-lg font-bold text-xs shadow" 
+                                onClick={() => {setAppliedPromo(null); setPromoCode(''); setSecureTotals(null);}}
+                            >
+                                Remove
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-1.5 rounded-xl flex gap-1">
+                    <button onClick={() => setActiveMethod('paystack')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${activeMethod === 'paystack' ? 'bg-white dark:bg-gray-700 shadow text-green-600 dark:text-white' : 'text-gray-400'}`}>
+                        <div className="flex items-center justify-center gap-2"><CreditCard className="w-4 h-4" /> Paystack</div>
+                    </button>
+                </div>
+
+                {activeMethod === 'paystack' ? (
+                    (orderType === 'delivery' && (!form.address || (!customerCoords && !globalCustomerCoords))) ?
+                        <button disabled className="w-full mt-4 bg-gray-300 dark:bg-gray-700 text-white font-bold py-4 rounded-xl cursor-not-allowed">Enter Delivery Details</button> :
+                        <button onClick={() => handlePayment('paystack')} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Pay Now'}</button>
+                ) : (<button onClick={() => handlePayment('crypto')} disabled={processing} className="w-full mt-4 bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">{processing ? 'Processing...' : 'Confirm Crypto Transfer'}</button>)}
             </div>
-            );
+        </div>
+    );
 };
 
 // Helper: check if a vendor is currently open based on their openTime/closeTime in vendorMetadata
@@ -1145,7 +1360,7 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
                                 <p className="text-red-500 text-xs mt-1">
                                     <b>{closedVendors.join(', ')}</b> {closedVendors.length > 1 ? 'are' : 'is'} currently closed.
                                     {vendorMetadata?.[closedVendors[0]]?.openTime && (
-                                        <> Opens at <b>{vendorMetadata[closedVendors[0]].openTime}</b>.</>  
+                                        <> Opens at <b>{vendorMetadata[closedVendors[0]].openTime}</b>.</>
                                     )}
                                 </p>
                             </div>
@@ -1154,11 +1369,10 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
                         <button
                             onClick={() => setShowModal(true)}
                             disabled={cart.length === 0 || hasClosedVendor}
-                            className={`w-full font-bold py-4 rounded-xl shadow-lg transition-colors ${
-                                hasClosedVendor
-                                    ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
-                                    : 'bg-green-600 hover:bg-green-700 text-white'
-                            }`}
+                            className={`w-full font-bold py-4 rounded-xl shadow-lg transition-colors ${hasClosedVendor
+                                ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+                                : 'bg-green-600 hover:bg-green-700 text-white'
+                                }`}
                         >
                             {hasClosedVendor ? '🔴 Cannot Checkout — Vendor Closed' : 'Checkout'}
                         </button>

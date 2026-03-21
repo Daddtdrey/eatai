@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share, MapPin
 } from 'lucide-react';
-import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors, logVisit, checkGoogleRedirectResult, getDeliveryPricingConfig } from './firebase.js';
+import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors, logVisit, checkGoogleRedirectResult, getDeliveryPricingConfig, setupForegroundNotifications } from './firebase.js';
 import { onAuthStateChanged } from 'firebase/auth';
 
 // 🟢 IMPORT MODULES
@@ -92,6 +92,16 @@ export default function EatAi() {
     useEffect(() => { localStorage.setItem('eatai_view', currentView); }, [currentView]);
     useEffect(() => { localStorage.setItem('eatai_cart', JSON.stringify(cart)); }, [cart]);
     useEffect(() => { localStorage.setItem('eatai_favorites', JSON.stringify(favorites)); }, [favorites]);
+
+    // 🟢 FOREGROUND NOTIFICATIONS
+    useEffect(() => {
+        setupForegroundNotifications((payload) => {
+            if (payload && payload.title) {
+                setNotification(`🔔 ${payload.title}: ${payload.body || ''}`);
+                setTimeout(() => setNotification(null), 6000);
+            }
+        });
+    }, []);
 
     // Visitor Tracking Effect
     useEffect(() => {
@@ -441,7 +451,7 @@ export default function EatAi() {
                 {/* REMOVED: LOCATION ENFORCEMENT BLOCKER */}
 
                 <main className={`flex-1 overflow-hidden relative flex flex-col`}>
-                    {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} setVendor={setVendor} setCity={setCity} />}
+                    {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} setVendor={setVendor} setCity={setCity} vendorsByLocation={vendorsByLocation} vendorMetadata={vendorMetadata} />}
 
                     {/* 🟢 PASS LOCATIONS */}
                     {currentView === 'location' &&

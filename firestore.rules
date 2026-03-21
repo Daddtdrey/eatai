@@ -57,10 +57,12 @@ service cloud.firestore {
       allow write: if isSuper();
     }
     
-    // 6. VENDORS — super admin only
+    // 6. VENDORS — Super admin and vendor writing their own logo
     match /vendors/{vendorId} {
       allow read: if true;
-      allow write: if isSuper();
+      allow write: if isSuper() || 
+                   (isVendor() && get(/databases/$(database)/documents/admins/$(request.auth.token.email)).data.vendor == vendorId) || 
+                   (isVendor() && get(/databases/$(database)/documents/admins/$(request.auth.token.email)).data.vendorName == vendorId);
     }
 
     // 7. BANNERS: Everyone reads, Admins write
@@ -74,10 +76,22 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // 9. SETTINGS (delivery pricing config etc.)
-    match /settings/{document=**} {
+    // 9. CONFIG (delivery pricing config etc.)
+    match /config/{document=**} {
       allow read: if true;
       allow write: if isSuper();
+    }
+
+    // 10. PROMOS
+    match /promoCodes/{document=**} {
+      allow read: if true;
+      allow write: if isSuper();
+    }
+
+    // 11. DISPUTES (Live Support)
+    match /disputes/{document=**} {
+      allow create: if isSignedIn();
+      allow read, update: if isSuper() || isVendor();
     }
   }
 }

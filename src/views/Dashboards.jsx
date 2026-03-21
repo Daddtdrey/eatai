@@ -2,30 +2,33 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
     Truck, CheckCircle, History, Box, Smile, Image as ImageIcon, Upload,
     Wrench, BarChart3, Package as PackageIcon, Volume2, Bell, PlayCircle,
-    MapPin, Phone, RefreshCw, Plus, X, ListPlus
+    MapPin, Phone, RefreshCw, Plus, X, ListPlus, Tag, MessageCircle
 } from 'lucide-react';
 
 // 🟢 IMPORTS: Added explicit extensions to fix build errors
 import { ViewContainer, WakeLockToggle, ProductCard } from '../components/UI.jsx';
 import { AnalyticsDashboard } from '../components/Analytic.jsx';
 import {
-    db, collection, query, where, orderBy, limit, onSnapshot,
-    updateOrderStatus, deleteOrder, addProduct, updateProduct, deleteProduct,
+    doc, setDoc, getDoc, collection, query, where, orderBy, limit, onSnapshot
+} from 'firebase/firestore';
+import {
+    db, updateOrderStatus, deleteOrder, addProduct, updateProduct, deleteProduct,
     uploadImage, saveVendorLogo, getAdminRole, requestNotificationPermission,
     getBanners, saveBanner, deleteBanner, getTodayVisitors, saveVendorLocation,
-    getVendorsWithLocation, getDeliveryPricingConfig, saveDeliveryPricingConfig
+    getVendorsWithLocation, getDeliveryPricingConfig, saveDeliveryPricingConfig,
+    getPromoCodes, savePromoCode, deletePromoCode, cleanCloudinaryLinks, migrateVendorProducts
 } from '../firebase.js';
 import { SUPER_ADMINS, SUB_ADMINS, LOCATIONS, VENDORS_BY_LOCATION } from '../config.js';
 import { DEFAULT_PRICING } from '../deliveryPricing.js';
 
 const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
 
-// 🟢 HELPER: Group identical items for cleaner lists
+// 🟢 HELPER: Group identical items for cleaner lists. Strict cartId to avoid addon collisions.
 const groupItems = (items) => {
     if (!items || !Array.isArray(items)) return [];
     const groups = {};
     items.forEach(item => {
-        const key = item.id;
+        const key = item.cartId || (item.id + JSON.stringify(item.selectedAddons || []) + (item.selectedSide || ''));
         if (!groups[key]) groups[key] = { ...item, quantity: 0 };
         groups[key].quantity += 1;
     });
@@ -173,6 +176,124 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
 };
 
 // ==========================================
+// 1.5 DATABASE MAINTENANCE TOOLS
+// ==========================================
+const DatabaseOperations = () => {
+    const [oldVendor, setOldVendor] = useState("");
+    const [newVendor, setNewVendor] = useState("");
+    const [isMigrating, setIsMigrating] = useState(false);
+
+    return (
+        <div className="bg-orange-50 dark:bg-orange-900/10 p-4 rounded-xl shadow-sm border border-orange-200 dark:border-orange-900/30 space-y-3">
+            <h3 className="font-bold text-orange-600 dark:text-orange-400">Vendor Merge / Migration</h3>
+            <p className="text-xs text-orange-500/80">
+                Safely move all products from an old/duplicate vendor name to a unified new vendor name.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+                <input type="text" placeholder="Old Vendor Name" value={oldVendor} onChange={e => setOldVendor(e.target.value)} className="w-full p-3 bg-white dark:bg-gray-900 rounded-xl outline-none text-sm border border-gray-200 dark:border-gray-700" />
+                <input type="text" placeholder="Target Vendor Name" value={newVendor} onChange={e => setNewVendor(e.target.value)} className="w-full p-3 bg-white dark:bg-gray-900 rounded-xl outline-none text-sm border border-gray-200 dark:border-gray-700" />
+            </div>
+            <button
+                onClick={async () => {
+                    if (!oldVendor || !newVendor) return alert("Both fields required!");
+                    if (oldVendor === newVendor) return alert("Names cannot be identical!");
+                    if (!confirm(`Are you sure you want to move ALL products from "${oldVendor}" to "${newVendor}"?`)) return;
+                    
+                    setIsMigrating(true);
+                    try {
+                        const { productsMoved, ordersMoved } = await migrateVendorProducts(oldVendor.trim(), newVendor.trim());
+                        alert(`Success! Migrated ${productsMoved} products and ${ordersMoved} historical orders from "${oldVendor}" to "${newVendor}".`);
+                        setOldVendor("");
+                        setNewVendor("");
+                    } catch (e) {
+                        alert("Migration Error: " + e.message);
+                    } finally {
+                        setIsMigrating(false);
+                    }
+                }}
+                disabled={isMigrating}
+                className="w-full bg-orange-600 text-white font-bold py-3 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2 shadow hover:bg-orange-700 transition"
+            >
+                <RefreshCw className={`w-4 h-4 ${isMigrating ? 'animate-spin' : ''}`} /> {isMigrating ? 'Migrating...' : 'Run Vendor Merger'}
+            </button>
+        </div>
+    );
+};
+
+// ==========================================
+// 1.8. LIVE SUPPORT DESK (Disputes)
+// ==========================================
+const DisputesTab = ({ isSuperAdmin, myVendorName }) => {
+    const [disputes, setDisputes] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        let q;
+        if (isSuperAdmin) {
+            q = query(collection(db, "disputes"), orderBy("createdAt", "desc"));
+        } else {
+            if (!myVendorName) { setLoading(false); return; }
+            q = query(collection(db, "disputes"), where("vendor", "==", myVendorName), orderBy("createdAt", "desc"));
+        }
+        
+        const unsub = onSnapshot(q, (snapshot) => {
+            setDisputes(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+            setLoading(false);
+        });
+        return () => unsub();
+    }, [isSuperAdmin, myVendorName]);
+
+    const handleResolve = async (id) => {
+        if (!confirm("Have you successfully resolved the customer's issue?")) return;
+        try {
+            await setDoc(doc(db, "disputes", id), { status: 'resolved', resolvedAt: new Date().toISOString() }, { merge: true });
+        } catch (e) {
+            alert("Failed to resolve dispute. " + e.message);
+        }
+    };
+
+    if (loading) return <div className="p-10 flex justify-center"><div className="animate-spin w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full"></div></div>;
+    
+    return (
+        <div className="space-y-4 max-w-2xl mx-auto">
+            <div className="bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 p-4 rounded-xl flex items-center justify-between mb-2 border border-red-100 dark:border-red-900/30">
+                <div>
+                    <h3 className="font-bold">Live Support Desk</h3>
+                    <p className="text-xs opacity-80">Respond to customer issues urgently.</p>
+                </div>
+                <div className="bg-red-500 text-white font-black px-3 py-1 rounded-full text-xs shadow-sm">
+                    {disputes.filter(d => d.status !== 'resolved').length} Open
+                </div>
+            </div>
+
+            {disputes.length === 0 ? <p className="text-center text-gray-500 dark:text-gray-400 py-10">No active support tickets. You're all caught up!</p> : null}
+
+            {disputes.map(d => (
+                <div key={d.id} className={`p-4 rounded-xl border ${d.status === 'resolved' ? 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 opacity-70' : 'bg-white dark:bg-gray-900 border-red-200 dark:border-red-900/50 shadow-sm'}`}>
+                    <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded ${d.status === 'resolved' ? 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300' : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'}`}>{d.status}</span>
+                            <span className="text-xs font-mono text-gray-500 dark:text-gray-400">Order #{d.orderId?.slice(0,6)}</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-gray-400">{new Date(d.createdAt).toLocaleString()}</span>
+                    </div>
+                    <p className="text-sm font-bold text-gray-800 dark:text-gray-100 mb-1">Customer: <a href={`mailto:${d.userEmail}`} className="text-blue-500 hover:text-blue-600">{d.userEmail}</a></p>
+                    {isSuperAdmin && <p className="text-xs font-bold text-orange-600 dark:text-orange-400 mb-2">Vendor: {d.vendor}</p>}
+                    <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg text-sm text-gray-700 dark:text-gray-200 mb-3 border border-gray-100 dark:border-gray-700 font-medium">
+                        "{d.issue}"
+                    </div>
+                    {d.status !== 'resolved' && (
+                        <button onClick={() => handleResolve(d.id)} className="w-full bg-green-500 hover:bg-green-600 active:scale-95 text-white font-bold py-3 rounded-xl text-xs transition-all shadow-sm">
+                            <CheckCircle className="w-4 h-4 inline mr-1 -mt-0.5" /> Mark as Resolved
+                        </button>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+};
+
+// ==========================================
 // 2. ADMIN VIEW (Vendors & Super Admin)
 // ==========================================
 export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNotification, vendorsByLocation }) => {
@@ -198,6 +319,7 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
 
     const [role, setRole] = useState(null);
     const [myVendorName, setMyVendorName] = useState(null);
+    const [isAcceptingOrders, setIsAcceptingOrders] = useState(true);
     const previousOrderCountRef = useRef(0);
     const audioRef = useRef(new Audio(NOTIFICATION_SOUND));
 
@@ -213,6 +335,26 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
         getBanners().then(setBanners);
         getTodayVisitors().then(setTodaysVisitors);
     }, []);
+
+    // 🟢 Monitor Vendor Live Status (Kill Switch)
+    useEffect(() => {
+        if (!myVendorName) return;
+        const unsub = onSnapshot(doc(db, "vendors", myVendorName), (docSnap) => {
+            if (docSnap.exists() && docSnap.data().isAcceptingOrders !== undefined) {
+                setIsAcceptingOrders(docSnap.data().isAcceptingOrders);
+            } else {
+                setIsAcceptingOrders(true);
+            }
+        });
+        return () => unsub();
+    }, [myVendorName]);
+
+    const toggleStoreStatus = async () => {
+        if (!myVendorName) return;
+        try {
+            await setDoc(doc(db, "vendors", myVendorName), { isAcceptingOrders: !isAcceptingOrders }, { merge: true });
+        } catch (e) { console.error("Failed to toggle store status", e); }
+    };
 
     // 🟢 Vendor Locations State (super admin)
     const [vendorsWithLocation, setVendorsWithLocation] = useState([]);
@@ -234,7 +376,32 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                 if (cfg) setPricingConfig(cfg);
             });
         }
+        if (activeTab === 'promos') {
+            getPromoCodes().then(setPromoCodes);
+        }
     }, [activeTab]);
+
+    // 🟢 Promos State (Super Admin)
+    const [promoCodes, setPromoCodes] = useState([]);
+    const [newPromo, setNewPromo] = useState({ code: '', celebrityName: '', maxUsesPerUser: 5, discountPercentage: 20, maxOrderCap: 6000, active: true });
+    const [isSavingPromo, setIsSavingPromo] = useState(false);
+
+    const handleSavePromo = async () => {
+        if (!newPromo.code || !newPromo.celebrityName) return alert('Code and Name required');
+        setIsSavingPromo(true);
+        // Ensure data is properly formatted
+        const formatted = {
+            ...newPromo,
+            code: newPromo.code.toUpperCase().trim(),
+            maxUsesPerUser: parseInt(newPromo.maxUsesPerUser),
+            discountPercentage: parseInt(newPromo.discountPercentage),
+            maxOrderCap: parseInt(newPromo.maxOrderCap)
+        };
+        await savePromoCode(formatted);
+        setNewPromo({ code: '', celebrityName: '', maxUsesPerUser: 5, discountPercentage: 20, maxOrderCap: 6000, active: true });
+        getPromoCodes().then(setPromoCodes);
+        setIsSavingPromo(false);
+    };
 
     const handleSavePricingConfig = async () => {
         setIsSavingPricing(true);
@@ -459,7 +626,21 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                     </div>
                 )}
                 {!isSuperAdmin && myVendorName && (
-                    <div className="flex gap-2 items-center"><label className="cursor-pointer bg-white p-2 rounded border border-gray-300"><input type="file" hidden onChange={e => setVendorLogoFile(e.target.files[0])} /><Upload className="w-4 h-4 text-gray-600" /></label>{vendorLogoFile && <button onClick={handleVendorLogoUpload} disabled={isSubmitting} className="text-xs bg-blue-500 text-white px-2 py-1 rounded">Save</button>}</div>
+                    <div className="flex flex-col items-end gap-2 text-right">
+                        <div className="flex items-center gap-2">
+                            <span className={`text-xs font-black uppercase tracking-wider ${isAcceptingOrders ? 'text-green-500' : 'text-red-500'}`}>{isAcceptingOrders ? 'ONLINE' : 'OFFLINE'}</span>
+                            <button onClick={toggleStoreStatus} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isAcceptingOrders ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isAcceptingOrders ? 'translate-x-6' : 'translate-x-1'}`} />
+                            </button>
+                        </div>
+                        <div className="flex gap-2 items-center">
+                            <label className="cursor-pointer bg-white p-2 text-xs rounded border border-gray-300 shadow-sm font-medium">
+                                <input type="file" hidden onChange={e => setVendorLogoFile(e.target.files[0])} />
+                                {vendorLogoFile ? 'Logo Selected' : 'Change Logo'}
+                            </label>
+                            {vendorLogoFile && <button onClick={handleVendorLogoUpload} disabled={isSubmitting} className="text-xs bg-blue-500 text-white font-bold px-3 py-2 rounded shadow">Upload</button>}
+                        </div>
+                    </div>
                 )}
             </div>
 
@@ -470,12 +651,18 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                 <button onClick={() => setActiveTab('orders')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'orders' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><PackageIcon className="w-4 h-4" /> Orders</button>
                 <button onClick={() => setActiveTab('products')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'products' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><Box className="w-4 h-4" /> Inventory</button>
                 <button onClick={() => setActiveTab('analytics')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'analytics' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><BarChart3 className="w-4 h-4" /> Stats</button>
+                <button onClick={() => setActiveTab('support')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'support' ? 'bg-white dark:bg-gray-700 shadow text-red-600' : 'text-gray-500'}`}><MessageCircle className="w-4 h-4" /> Support</button>
                 {isSuperAdmin && <button onClick={() => setActiveTab('banners')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'banners' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><ImageIcon className="w-4 h-4" /> Banners</button>}
                 {isSuperAdmin && <button onClick={() => setActiveTab('locations')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'locations' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><MapPin className="w-4 h-4" /> Locations</button>}
                 {isSuperAdmin && <button onClick={() => setActiveTab('pricing')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'pricing' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><Wrench className="w-4 h-4" /> Pricing</button>}
+                {isSuperAdmin && <button onClick={() => setActiveTab('promos')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-1 ${activeTab === 'promos' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}><Tag className="w-4 h-4" /> Promos</button>}
             </div>
 
-            <div className="flex-1 overflow-y-auto pb-32 scrollbar-hide min-h-0">
+            <div className="flex-1 overflow-y-auto pb-32 scrollbar-hide min-h-0 px-2 sm:px-0">
+
+                {activeTab === 'support' && (
+                    <DisputesTab isSuperAdmin={isSuperAdmin} myVendorName={myVendorName} />
+                )}
 
                 {activeTab === 'analytics' && (
                     <AnalyticsDashboard orders={adminOrders} role={role} myVendorName={myVendorName} />
@@ -556,14 +743,37 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                             <div key={v.id} className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
                                 {/* Header */}
                                 <div className="flex justify-between items-start">
-                                    <div>
-                                        <p className="font-bold text-gray-800 dark:text-white">{v.name || v.id}</p>
-                                        {v.lat && v.lng ? (
-                                            <p className="text-xs text-green-600 font-medium mt-0.5">✅ Location set: {parseFloat(v.lat).toFixed(5)}, {parseFloat(v.lng).toFixed(5)}</p>
-                                        ) : (
-                                            <p className="text-xs text-red-400 font-medium mt-0.5">⚠️ No location set</p>
-                                        )}
+                                    <div className="flex items-center gap-3">
+                                        {v.logo ? <img src={v.logo} className="w-10 h-10 rounded-lg object-cover bg-gray-100" /> : <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs text-gray-400">No Logo</div>}
+                                        <div>
+                                            <p className="font-bold text-gray-800 dark:text-white">{v.name || v.id}</p>
+                                            {v.lat && v.lng ? (
+                                                <p className="text-xs text-green-600 font-medium mt-0.5">✅ Location set: {parseFloat(v.lat).toFixed(5)}, {parseFloat(v.lng).toFixed(5)}</p>
+                                            ) : (
+                                                <p className="text-xs text-red-400 font-medium mt-0.5">⚠️ No location set</p>
+                                            )}
+                                        </div>
                                     </div>
+                                    <label className="cursor-pointer bg-orange-50 dark:bg-gray-700 text-orange-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-orange-100 transition-colors shrink-0">
+                                        <input type="file" hidden accept="image/*" onChange={async e => {
+                                            const file = e.target.files[0];
+                                            if (!file) return;
+                                            try {
+                                                setLocSaving(prev => ({ ...prev, [v.id]: true }));
+                                                const url = await saveVendorLogo(v.id.trim(), file);
+                                                if (!url) throw new Error("File upload failed in Storage.");
+                                                getVendorsWithLocation().then(setVendorsWithLocation);
+                                                alert(`Logo for ${v.name} successfully updated!`);
+                                            } catch (err) {
+                                                console.error(err);
+                                                alert("Logo upload failed: " + err.message);
+                                            } finally {
+                                                setLocSaving(prev => ({ ...prev, [v.id]: false }));
+                                                e.target.value = null; // reset input
+                                            }
+                                        }} disabled={locSaving[v.id]} />
+                                        {locSaving[v.id] ? 'Uploading...' : (v.logo ? 'Change Logo' : 'Upload Logo')}
+                                    </label>
                                 </div>
 
                                 {/* Address Search */}
@@ -678,6 +888,8 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
 
                 {activeTab === 'banners' && isSuperAdmin && (
                     <div className="space-y-4">
+                        {/* 🟢 Database Operations State */}
+                        <DatabaseOperations />
                         <h2 className="text-xl font-bold dark:text-white mb-2">Manage Promo Banners</h2>
                         <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 space-y-3">
                             <input type="text" placeholder="Banner Title" value={bannerTitle} onChange={e => setBannerTitle(e.target.value)} className="w-full p-3 bg-gray-50 dark:bg-gray-900 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
@@ -698,6 +910,28 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                 {isUploadingBanner ? 'Uploading...' : 'Add Banner'}
                             </button>
                         </div>
+                        
+                        {/* 🔴 DANGER ZONE: Cloudinary Cleanup */}
+                        <div className="bg-red-50 dark:bg-red-900/10 p-4 rounded-xl shadow-sm border border-red-200 dark:border-red-900/30 mt-8 space-y-3">
+                            <h3 className="font-bold text-red-600 dark:text-red-400">Database Image Sync</h3>
+                            <p className="text-xs text-red-500/80">
+                                This will safely remove all broken, disconnected Cloudinary links from the products and vendors databases and set them to standard blank placeholders.
+                            </p>
+                            <button
+                                onClick={async () => {
+                                    if (!confirm("Are you sure? This will remove all cloudinary links permanently from the database. It will not touch any freshly uploaded Firebase Storage images.")) return;
+                                    try {
+                                        const count = await cleanCloudinaryLinks();
+                                        alert(`Success! Safely wiped ${count} broken Cloudinary image links from the database.`);
+                                    } catch (e) {
+                                        alert("Error wiping links: " + e.message);
+                                    }
+                                }}
+                                className="w-full bg-red-600 text-white font-bold py-3 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2 shadow hover:bg-red-700 transition"
+                            >
+                                <RefreshCw className="w-4 h-4" /> Wipe ALL Cloudinary Links
+                            </button>
+                        </div>
 
                         <div className="space-y-3 mt-6">
                             {banners.length === 0 ? <p className="text-center text-gray-400 mt-6">No active banners.</p> : banners.map(b => (
@@ -708,6 +942,69 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                         {b.linkToVendor && <p className="text-xs text-blue-500 mt-1">🏷️ Loops to: {b.linkToVendor}</p>}
                                     </div>
                                     <button onClick={async () => { if (confirm('Delete banner?')) { await deleteBanner(b.id); getBanners().then(setBanners); } }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><X className="w-5 h-5" /></button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* 🟢 PROMOS TAB (Super Admin Only) */}
+                {activeTab === 'promos' && isSuperAdmin && (
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <h2 className="text-xl font-bold dark:text-white">Discount & Promo Codes</h2>
+                        </div>
+                        <p className="text-xs text-gray-400 mb-2">Create custom voucher codes. They apply a discount to the food subtotal (not delivery fee).</p>
+                        
+                        {promoCodes.length >= 5 ? (
+                            <div className="bg-yellow-50 text-yellow-700 p-3 rounded-xl text-sm border border-yellow-200">
+                                You have reached the maximum limit of 5 active promo codes. Delete an existing code to create a new one.
+                            </div>
+                        ) : (
+                            <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 space-y-3">
+                                <div className="flex gap-2">
+                                    <input type="text" placeholder="CODE (e.g. DAVIDO20)" value={newPromo.code} onChange={e => setNewPromo({...newPromo, code: e.target.value.toUpperCase()})} className="w-1/2 p-3 text-sm bg-gray-50 dark:bg-gray-900 rounded-xl outline-none border focus:border-orange-500 dark:border-gray-700 dark:text-white uppercase font-bold" />
+                                    <input type="text" placeholder="Sponsor/Celebrity Name" value={newPromo.celebrityName} onChange={e => setNewPromo({...newPromo, celebrityName: e.target.value})} className="w-1/2 p-3 text-sm bg-gray-50 dark:bg-gray-900 rounded-xl outline-none border focus:border-orange-500 dark:border-gray-700 dark:text-white" />
+                                </div>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <div>
+                                        <label className="text-[10px] uppercase font-bold text-gray-400">Discount (%)</label>
+                                        <input type="number" placeholder="20" value={newPromo.discountPercentage} onChange={e => setNewPromo({...newPromo, discountPercentage: e.target.value})} className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-900 rounded-lg outline-none border dark:border-gray-700 dark:text-white" />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] uppercase font-bold text-gray-400">Uses per user</label>
+                                        <input type="number" placeholder="5" value={newPromo.maxUsesPerUser} onChange={e => setNewPromo({...newPromo, maxUsesPerUser: e.target.value})} className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-900 rounded-lg outline-none border dark:border-gray-700 dark:text-white" />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] uppercase font-bold text-gray-400">Max Cap (₦)</label>
+                                        <input type="number" placeholder="6000" value={newPromo.maxOrderCap} onChange={e => setNewPromo({...newPromo, maxOrderCap: e.target.value})} className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-900 rounded-lg outline-none border dark:border-gray-700 dark:text-white" />
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={handleSavePromo}
+                                    disabled={isSavingPromo || !newPromo.code || !newPromo.celebrityName}
+                                    className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2 shadow hover:bg-blue-700 transition"
+                                >
+                                    {isSavingPromo ? 'Saving...' : 'Create Promo Code'}
+                                </button>
+                            </div>
+                        )}
+
+                        <div className="space-y-3 mt-6">
+                            {promoCodes.length === 0 ? <p className="text-center text-gray-400 mt-6">No promo codes active.</p> : promoCodes.map(p => (
+                                <div key={p.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col gap-3">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <h4 className="font-black text-lg text-orange-600 dark:text-orange-400 font-mono tracking-wider">{p.code}</h4>
+                                            <p className="text-xs text-gray-500 font-medium">{p.celebrityName} Campaign</p>
+                                        </div>
+                                        <button onClick={async () => { if (confirm('Delete promo code?')) { await deletePromoCode(p.id); getPromoCodes().then(setPromoCodes); } }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><X className="w-5 h-5" /></button>
+                                    </div>
+                                    <div className="flex gap-4 border-t dark:border-gray-700 pt-3 text-xs text-gray-600 dark:text-gray-300">
+                                        <div><span className="font-bold">{p.discountPercentage}%</span> off food</div>
+                                        <div>Max Cap <span className="font-bold">₦{p.maxOrderCap}</span></div>
+                                        <div><span className="font-bold">{p.maxUsesPerUser}</span> lifetime uses</div>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -756,18 +1053,42 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                         {/* Scrollable Content */}
                                         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 scrollbar-hide">
 
-                                            {/* Total */}
-                                            <div className="flex justify-between items-center bg-orange-50 dark:bg-orange-900/20 p-4 rounded-2xl">
-                                                <div>
-                                                    <p className="text-[10px] text-gray-400 font-bold uppercase">Total Amount</p>
-                                                    <p className="text-3xl font-black text-gray-900 dark:text-white">₦{selectedOrder.total.toLocaleString()}</p>
+                                            {/* ORDER BREAKDOWN */}
+                                            {isSuperAdmin ? (
+                                                <div className="bg-orange-50 dark:bg-orange-900/10 p-4 rounded-2xl border border-orange-100 dark:border-orange-900/30 space-y-2">
+                                                    <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 font-medium pb-1 border-b border-orange-200 dark:border-orange-800/50">
+                                                        <span>Food Subtotal</span>
+                                                        <span>₦{(selectedOrder.subTotal || selectedOrder.total - (selectedOrder.deliveryFee || 0)).toLocaleString()}</span>
+                                                    </div>
+                                                    <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 font-medium pb-1 border-b border-orange-200 dark:border-orange-800/50">
+                                                        <span>Delivery Fee</span>
+                                                        <span>₦{(selectedOrder.deliveryFee || 0).toLocaleString()}</span>
+                                                    </div>
+                                                    {selectedOrder.discount > 0 && (
+                                                        <div className="flex justify-between text-xs text-green-600 font-bold pb-1 bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded-lg -mx-2 mb-2">
+                                                            <span>Promo Applied ({selectedOrder.promoCode})</span>
+                                                            <span>- ₦{selectedOrder.discount.toLocaleString()}</span>
+                                                        </div>
+                                                    )}
+                                                    <div className="flex justify-between items-end pt-2">
+                                                        <div>
+                                                            <p className="text-[10px] text-orange-400 font-bold uppercase mb-0.5">Grand Total</p>
+                                                            <p className="text-3xl font-black text-gray-900 dark:text-white leading-none">₦{selectedOrder.total.toLocaleString()}</p>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-[10px] text-gray-400 font-bold uppercase">Payment</p>
+                                                            <p className="text-sm font-bold text-orange-600 uppercase">{selectedOrder.paymentMethod}</p>
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                                <div className="text-right">
-                                                    <p className="text-[10px] text-gray-400 font-bold uppercase">Payment</p>
-                                                    <p className="text-sm font-bold text-orange-600 uppercase">{selectedOrder.paymentMethod}</p>
-                                                    {selectedOrder.deliveryFee > 0 && <p className="text-[10px] text-gray-400 mt-1">incl. ₦{selectedOrder.deliveryFee} delivery</p>}
+                                            ) : (
+                                                <div className="flex justify-between items-center bg-orange-50 dark:bg-orange-900/20 p-4 rounded-2xl">
+                                                    <div>
+                                                        <p className="text-[10px] text-gray-400 font-bold uppercase">Vendor Items Total</p>
+                                                        <p className="text-3xl font-black text-gray-900 dark:text-white">₦{selectedOrder.total.toLocaleString()}</p>
+                                                    </div>
                                                 </div>
-                                            </div>
+                                            )}
 
                                             {/* Items */}
                                             <div>
@@ -776,7 +1097,15 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                                     {groupItems(selectedOrder.items).map((item, idx) => (
                                                         <div key={idx} className="flex justify-between items-start py-2 border-b border-gray-200 dark:border-gray-700 last:border-0">
                                                             <div className="flex-1">
-                                                                <p className="font-bold text-sm dark:text-white">{item.quantity > 1 && <span className="text-orange-600 mr-1">{item.quantity}x</span>}{item.name}</p>
+                                                                <div className="flex justify-between items-center">
+                                                                    <p className="font-bold text-sm dark:text-white">
+                                                                        {item.quantity > 1 && <span className="text-orange-600 mr-1">{item.quantity}x</span>}
+                                                                        {item.name}
+                                                                    </p>
+                                                                    <p className="text-xs font-bold text-gray-500 dark:text-gray-400">
+                                                                        ₦{(item.price * (item.quantity || 1)).toLocaleString()}
+                                                                    </p>
+                                                                </div>
                                                                 {item.selectedAddons && item.selectedAddons.length > 0 && <p className="text-[10px] text-orange-500 font-bold mt-0.5">+ {item.selectedAddons.map(a => `${a.name} (₦${a.price})`).join(', ')}</p>}
                                                                 {item.selectedSide && <p className="text-[10px] text-orange-500 font-bold mt-0.5">+ {item.selectedSide} (₦{item.sidePrice})</p>}
                                                                 {item.note && <p className="text-[10px] text-red-500 font-bold italic mt-0.5">📝 {item.note}</p>}

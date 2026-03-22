@@ -24,6 +24,11 @@
     "react-dom": "^19.2.0",
     "react-paystack": "^6.0.0"
   },
+  "overrides": {
+    "react-paystack": {
+      "react": "$react"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/react": "^19.2.5",

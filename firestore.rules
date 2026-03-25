@@ -82,6 +82,12 @@ service cloud.firestore {
       allow write: if isSuper();
     }
 
+    // 9b. SETTINGS (delivery pricing saved here)
+    match /settings/{document=**} {
+      allow read: if true;
+      allow write: if isSuper();
+    }
+
     // 10. PROMOS
     match /promoCodes/{document=**} {
       allow read: if true;

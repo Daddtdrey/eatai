@@ -250,13 +250,13 @@ exports.calculateCheckoutTotals = onCall(async (request) => {
     // 2. Calculate Delivery Fee
     let deliveryFee = 0;
     if (deliveryType === "delivery") {
-        const pricingSnap = await db.collection("config").doc("delivery_pricing").get();
+        // Read from 'settings' collection (where admin saves via saveDeliveryPricingConfig)
+        const pricingSnap = await db.collection("settings").doc("delivery_pricing").get();
         const pricing = pricingSnap.exists ? pricingSnap.data() : {
             baseFee: 1100, perKmRate: 300, maxFee: 3000, multiVendorSurcharge: 300
         };
 
         let maxDistance = 0;
-        let missingVendorLocation = false;
 
         for (const vendorName of vendorsInCart) {
             const vendorSnap = await db.collection("vendors").doc(vendorName).get();
@@ -264,22 +264,19 @@ exports.calculateCheckoutTotals = onCall(async (request) => {
                 const dist = calculateDistanceKm(vendorSnap.data().lat, vendorSnap.data().lng, customerCoords.lat, customerCoords.lng);
                 if (dist > maxDistance) maxDistance = dist;
             } else {
-                missingVendorLocation = true;
+                // Vendor has no GPS saved — estimate 2km as a reasonable campus default
+                if (2 > maxDistance) maxDistance = 2;
             }
         }
 
-        if (missingVendorLocation) {
-            deliveryFee = pricing.baseFee;
-        } else {
-            let fee = pricing.baseFee + (maxDistance * pricing.perKmRate);
-            fee = Math.min(fee, pricing.maxFee);
-            fee = Math.round(fee / 50) * 50;
-            
-            if (vendorsInCart.size > 1) {
-                fee = Math.min(fee + pricing.multiVendorSurcharge, pricing.maxFee);
-            }
-            deliveryFee = fee;
+        let fee = pricing.baseFee + (maxDistance * pricing.perKmRate);
+        fee = Math.min(fee, pricing.maxFee);
+        fee = Math.round(fee / 50) * 50;
+
+        if (vendorsInCart.size > 1) {
+            fee = Math.min(fee + pricing.multiVendorSurcharge, pricing.maxFee);
         }
+        deliveryFee = fee;
     }
 
     // 3. Process Promo Code

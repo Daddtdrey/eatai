@@ -994,7 +994,7 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
     const initializePayment = usePaystackPayment({
         reference: orderId,
         email: user?.email,
-        amount: displayGrandTotal * 100, // Syncs with derived state
+        amount: (secureTotals ? secureTotals.grandTotal : displayGrandTotal) * 100,
         publicKey: PAYSTACK_KEY,
     });
 
@@ -1052,12 +1052,8 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
             const finalGrandTotal = result.data.grandTotal;
             const finalDeliveryFee = result.data.deliveryFee;
 
-            // Safety check against frontend estimated total if no promo was applied manually
-            if (!appliedPromo && Math.abs(finalGrandTotal - estimatedTotal) > 10) {
-                 setSecureTotals(result.data);
-                 setProcessing(false);
-                 return alert(`Prices or delivery fees have updated from the server. Your new total is ₦${finalGrandTotal.toLocaleString()}. Please review and click Pay Now again.`);
-            }
+            // Always trust the server's verified total — update UI and proceed immediately
+            setSecureTotals(result.data);
 
             if (method === 'paystack') {
                 await createOrder(

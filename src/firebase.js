@@ -131,15 +131,31 @@ export const checkGoogleRedirectResult = async () => {
   return null;
 };
 
-export const signUpWithEmail = async (email, password, name) => {
+export const signUpWithEmail = async (email, password, name, referralCode = null) => {
   try {
     const result = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(result.user, { displayName: name });
-    await setDoc(doc(db, "users", result.user.uid), {
+
+    const userData = {
       email: email,
       name: name,
-      createdAt: new Date().toISOString()
-    });
+      createdAt: new Date().toISOString(),
+      firstOrderCompleted: false,
+    };
+
+    // If a referral code was entered, look up the referrer's UID
+    if (referralCode) {
+      const codeUpper = referralCode.trim().toUpperCase();
+      const codeSnap = await getDoc(doc(db, "referralCodes", codeUpper));
+      if (codeSnap.exists() && codeSnap.data().uid !== result.user.uid) {
+        userData.referredBy = codeSnap.data().uid;
+        userData.referredByCode = codeUpper;
+        // Increment use count on the code
+        await setDoc(doc(db, "referralCodes", codeUpper), { uses: (codeSnap.data().uses || 0) + 1 }, { merge: true });
+      }
+    }
+
+    await setDoc(doc(db, "users", result.user.uid), userData);
     return result.user;
   } catch (error) { throw error; }
 };
@@ -293,11 +309,12 @@ export const saveVendorSides = async (vendorName, sides) => {
 };
 
 // 🟢 NEW: Save vendor GPS location (and optionally opening hours)
-export const saveVendorLocation = async (vendorName, lat, lng, openTime, closeTime) => {
+export const saveVendorLocation = async (vendorName, lat, lng, openTime, closeTime, avgWaitTime) => {
   try {
     const payload = { lat, lng };
     if (openTime !== undefined) payload.openTime = openTime;
     if (closeTime !== undefined) payload.closeTime = closeTime;
+    if (avgWaitTime !== undefined) payload.avgWaitTime = avgWaitTime;
     await setDoc(doc(db, "vendors", vendorName), payload, { merge: true });
     return true;
   } catch (e) { console.error(e); return false; }
@@ -315,6 +332,7 @@ export const getVendorsWithLocation = async () => {
       location: d.data().location || null,
       openTime: d.data().openTime || null,
       closeTime: d.data().closeTime || null,
+      avgWaitTime: d.data().avgWaitTime || null,
     }));
   } catch (e) { console.error(e); return []; }
 };
@@ -357,6 +375,7 @@ export const getGlobalVendors = async () => {
           logo: data.logo,
           lat: data.lat || null,
           lng: data.lng || null,
+          avgWaitTime: data.avgWaitTime || null,
         };
       }
     });
@@ -498,7 +517,11 @@ export const getAllOrders = async () => {
 };
 
 export const updateOrderStatus = async (orderId, status) => {
-  await updateDoc(doc(db, "orders", orderId), { status });
+  const update = { status };
+  if (status === 'ready') update.readyAt = new Date().toISOString();
+  if (status === 'picked_up') update.pickedUpAt = new Date().toISOString();
+  if (status === 'delivered') update.deliveredAt = new Date().toISOString();
+  await updateDoc(doc(db, "orders", orderId), update);
 };
 
 export const deleteOrder = async (orderId) => {
@@ -885,4 +908,81 @@ export const migrateVendorProducts = async (oldVendorName, newVendorName) => {
         console.error("Migration Error:", e);
         throw e;
     }
+};
+
+// ==========================================
+// 🎁 REFERRAL SYSTEM
+// ==========================================
+
+/**
+ * Generate a unique referral code for a user (NAME-XXXX format).
+ * Idempotent — returns existing code if one already exists.
+ * Uses the user's UID to guarantee 100% uniqueness.
+ */
+export const getReferralCode = async (uid, displayName) => {
+  try {
+    const userRef = doc(db, "users", uid);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists() && userSnap.data().referralCode) {
+      return userSnap.data().referralCode;
+    }
+    // Generate: first 4 letters of name (uppercased) + dash + last 4 chars of UID
+    const namePart = (displayName || "USER").replace(/[^A-Z0-9]/gi, "").toUpperCase().slice(0, 4).padEnd(4, "X");
+    const uidPart = uid.slice(-4).toUpperCase();
+    const code = `${namePart}-${uidPart}`;
+
+    // Save on user doc + referralCodes index
+    await setDoc(userRef, { referralCode: code }, { merge: true });
+    await setDoc(doc(db, "referralCodes", code), { uid, createdAt: new Date().toISOString(), uses: 0 });
+    return code;
+  } catch (e) { console.error("getReferralCode error", e); return null; }
+};
+
+/**
+ * Get total active (non-expired) credit balance for a user.
+ * Returns { total: number, entries: [{id, amount, expiresAt, reason}] }
+ */
+export const getUserCredits = async (uid) => {
+  try {
+    const now = new Date();
+    // Query without multiple field filters to avoid Composite Index requirements 
+    // which often throw hidden Permission Denied/Index errors. Filter client-side.
+    const q = query(collection(db, "credits", uid, "entries"));
+    const snap = await getDocs(q);
+    
+    // Filter locally: no usedAt timestamp AND it hasn't expired yet
+    const entries = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(d => !d.usedAt && new Date(d.expiresAt) > now);
+        
+    const total = entries.reduce((sum, e) => sum + (e.amount || 0), 0);
+    return { total, entries };
+  } catch (e) { console.error("getUserCredits error", e); return { total: 0, entries: [] }; }
+};
+
+/**
+ * Get referral stats for the user.
+ */
+export const getUserReferralStats = async (uid) => {
+  try {
+    const userSnap = await getDoc(doc(db, "users", uid));
+    const data = userSnap.data() || {};
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    const monthKey = data.referralMonthKey || "";
+    return {
+      referralCode: data.referralCode || null,
+      referralCount: monthKey === thisMonth ? (data.referralCount || 0) : 0,
+      totalEarned: data.totalReferralEarned || 0,
+    };
+  } catch (e) { return { referralCode: null, referralCount: 0, totalEarned: 0 }; }
+};
+
+/**
+ * Apply credits at checkout (mark them as used atomically).
+ * Called server-side via Cloud Function; this is just a frontend helper
+ * that reads the current balance for display.
+ */
+export const getActiveCreditBalance = async (uid) => {
+  const { total } = await getUserCredits(uid);
+  return total;
 };

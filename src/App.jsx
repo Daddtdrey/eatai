@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-    ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share, MapPin
+    ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share, MapPin, Package, LogIn
 } from 'lucide-react';
 import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors, logVisit, checkGoogleRedirectResult, getDeliveryPricingConfig, setupForegroundNotifications } from './firebase.js';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -12,6 +12,7 @@ import {
     MarketView, OrdersView, WalletView, DeciderView, CartOverlay
 } from './views/Shop.jsx';
 import { AdminView, LogisticsView } from './views/Dashboards.jsx';
+import OnboardingScreen from './views/Onboarding.jsx';
 import { SUPER_ADMINS, LOGISTICS_EMAILS, SUB_ADMINS, VENDORS_BY_LOCATION as FALLBACK_VENDORS, LOCATIONS } from './config.js';
 import { DEFAULT_PRICING } from './deliveryPricing.js';
 
@@ -22,6 +23,12 @@ export default function EatAi() {
     const [currentView, setCurrentView] = useState(localStorage.getItem('eatai_view') || 'home');
     const [user, setUser] = useState(null);
     const [authLoading, setAuthLoading] = useState(true);
+
+    // 🟠 Onboarding: show only once per session for logged-out users
+    const [showOnboarding, setShowOnboarding] = useState(
+        () => !sessionStorage.getItem('eatai_onboarding_seen')
+    );
+    const [onboardingLoginMode, setOnboardingLoginMode] = useState(false);
 
     // 2. Data State (Pagination & Vendors)
     const [marketData, setMarketData] = useState([]);
@@ -93,6 +100,17 @@ export default function EatAi() {
     useEffect(() => { localStorage.setItem('eatai_cart', JSON.stringify(cart)); }, [cart]);
     useEffect(() => { localStorage.setItem('eatai_favorites', JSON.stringify(favorites)); }, [favorites]);
 
+    // 🎁 Deep Link Referral Capture (e.g. eatai.ng/JOHN-A1B2)
+    useEffect(() => {
+        const path = window.location.pathname.replace('/', '').toUpperCase();
+        // Check if it looks like a referral code (4 chars, dash, 4 chars)
+        if (/^[A-Z0-9]{3,5}-[A-Z0-9]{4}$/.test(path)) {
+            localStorage.setItem('eatai_pending_referral', path);
+            window.history.replaceState({}, document.title, '/'); // Clean URL
+            setCurrentView('login'); // auto-trigger login/signup
+        }
+    }, []);
+
     // 🟢 FOREGROUND NOTIFICATIONS
     useEffect(() => {
         setupForegroundNotifications((payload) => {
@@ -112,8 +130,19 @@ export default function EatAi() {
         }
     }, []);
 
-    // 🟢 App-entry location detection (like Uber Eats/DoorDash)
+    // 🟢 App-entry location detection — with localStorage cache for iOS fallback
     useEffect(() => {
+        // Immediately restore cached coords so returning users (especially iOS) don't wait
+        try {
+            const cached = localStorage.getItem('eatai_last_coords');
+            if (cached) {
+                const { lat, lng, area } = JSON.parse(cached);
+                setGlobalCustomerCoords({ lat, lng });
+                if (area) setDetectedArea(area);
+                setLocationLoading(false);
+            }
+        } catch { /* ignore */ }
+
         if (!navigator.geolocation) {
             setLocationDenied(true);
             setLocationLoading(false);
@@ -125,26 +154,31 @@ export default function EatAi() {
             navigator.geolocation.getCurrentPosition(
                 async (pos) => {
                     setLocationDenied(false);
-                    setGlobalCustomerCoords({
-                        lat: pos.coords.latitude,
-                        lng: pos.coords.longitude
-                    });
+                    const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                    setGlobalCustomerCoords(coords);
+                    let area = 'Your Area';
                     try {
                         const resp = await fetch(
-                            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`,
+                            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.lat}&lon=${coords.lng}`,
                             { headers: { 'Accept-Language': 'en' } }
                         );
                         const data = await resp.json();
                         const a = data.address || {};
-                        setDetectedArea(a.city || a.town || a.village || a.suburb || a.county || 'Your Area');
+                        area = a.city || a.town || a.village || a.suburb || a.county || 'Your Area';
+                        setDetectedArea(area);
                     } catch { /* silently fail */ }
+                    // Cache for next session — helps iOS users who block repeated prompts
+                    try {
+                        localStorage.setItem('eatai_last_coords', JSON.stringify({ lat: coords.lat, lng: coords.lng, area }));
+                    } catch { /* ignore */ }
                     setLocationLoading(false);
                 },
                 () => {
                     setLocationDenied(true);
                     setLocationLoading(false);
                 },
-                { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+                // enableHighAccuracy: false is critical on older iOS — avoids GPS timeout
+                { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }
             );
         };
 
@@ -177,6 +211,8 @@ export default function EatAi() {
         const u = onAuthStateChanged(auth, (c) => {
             setUser(c);
             setAuthLoading(false);
+            // Navigate home on login so guest's current view resets cleanly
+            if (c) setCurrentView(v => v === 'login' ? 'home' : v);
         });
         return () => u();
     }, []);
@@ -379,7 +415,33 @@ export default function EatAi() {
 
     // --- RENDER ---
     if (authLoading) return <div className="min-h-screen flex items-center justify-center dark:bg-gray-900"><div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (!user) return <div className={darkMode ? "dark" : ""}><LoginView /></div>;
+
+    // Show onboarding splash only for guests on first session visit
+    if (!user && showOnboarding) {
+        return (
+            <OnboardingScreen
+                onGetStarted={() => {
+                    sessionStorage.setItem('eatai_onboarding_seen', '1');
+                    setOnboardingLoginMode(false);
+                    setShowOnboarding(false);
+                    setCurrentView('login');
+                }}
+                onLogin={() => {
+                    sessionStorage.setItem('eatai_onboarding_seen', '1');
+                    setOnboardingLoginMode(true);
+                    setShowOnboarding(false);
+                    setCurrentView('login');
+                }}
+                onBrowseAsGuest={() => {
+                    sessionStorage.setItem('eatai_onboarding_seen', '1');
+                    setShowOnboarding(false);
+                    setCurrentView('home');
+                }}
+            />
+        );
+    }
+
+    const isGuest = !user;
 
     return (
         <div className={darkMode ? "dark" : ""}>
@@ -399,7 +461,6 @@ export default function EatAi() {
                         </div>
                         <div className="flex gap-2">
                             <button onClick={() => setShowInstallBanner(false)} className="p-2 text-orange-200 hover:text-white"><X className="w-5 h-5" /></button>
-                            {/* Only show 'Install' button on Android. iOS requires manual action. */}
                             {!isIOS && <button onClick={handleInstallClick} className="bg-white text-orange-600 px-4 py-2 rounded-lg text-xs font-bold shadow-sm">Install</button>}
                             {isIOS && <div className="animate-bounce"><Share className="w-5 h-5" /></div>}
                         </div>
@@ -426,7 +487,6 @@ export default function EatAi() {
                 <header className="flex-none flex items-center justify-between px-4 py-3 bg-[#FDFBF7]/80 backdrop-blur-md dark:bg-gray-900/80 shadow-sm z-40 transition-colors border-b border-gray-200/50 dark:border-gray-800">
                     <div className="flex items-center gap-2">
                         <div className="text-xl font-black text-orange-500 cursor-pointer" onClick={() => setCurrentView('home')}>EatAi</div>
-                        {/* 🟢 Location pill — shows detected area */}
                         {locationLoading && (
                             <div className="flex items-center gap-1 text-xs text-gray-400 animate-pulse">
                                 <MapPin className="w-3 h-3" /> Detecting...
@@ -442,18 +502,32 @@ export default function EatAi() {
                             </button>
                         )}
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                         <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">{darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}</button>
-                        <button onClick={logout} className="p-2 rounded-full hover:bg-red-50 text-red-500 transition-colors"><LogOut className="w-5 h-5" /></button>
+                        {isGuest ? (
+                            <button
+                                onClick={() => { setOnboardingLoginMode(false); setCurrentView('login'); }}
+                                className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-2 rounded-full transition-colors shadow-sm"
+                            >
+                                <LogIn className="w-3.5 h-3.5" /> Log In / Sign Up
+                            </button>
+                        ) : (
+                            <>
+                                <button onClick={() => setCurrentView('orders')} className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors relative ${currentView === 'orders' ? 'text-orange-500' : 'text-gray-600 dark:text-gray-300'}`}>
+                                    <Package className="w-5 h-5" />
+                                </button>
+                                <button onClick={logout} className="p-2 rounded-full hover:bg-red-50 text-red-500 transition-colors"><LogOut className="w-5 h-5" /></button>
+                            </>
+                        )}
                     </div>
                 </header>
 
-                {/* REMOVED: LOCATION ENFORCEMENT BLOCKER */}
-
                 <main className={`flex-1 overflow-hidden relative flex flex-col`}>
-                    {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} setVendor={setVendor} setCity={setCity} vendorsByLocation={vendorsByLocation} vendorMetadata={vendorMetadata} />}
+                    {/* Login view — accessible without auth for guests */}
+                    {currentView === 'login' && <LoginView defaultMode={onboardingLoginMode ? 'login' : 'signup'} />}
 
-                    {/* 🟢 PASS LOCATIONS */}
+                    {currentView === 'home' && <HomeView setCurrentView={setCurrentView} user={user} setVendor={setVendor} setCity={setCity} vendorsByLocation={vendorsByLocation} vendorMetadata={vendorMetadata} marketData={marketData} addToCart={addToCart} loadingData={loadingData} />}
+
                     {currentView === 'location' &&
                         <LocationSelectionView
                             setCity={setCity}
@@ -462,7 +536,6 @@ export default function EatAi() {
                         />
                     }
 
-                    {/* 🟢 PASS DYNAMIC VENDORS */}
                     {currentView === 'vendors' &&
                         <VendorSelectionView
                             city={city}
@@ -473,7 +546,6 @@ export default function EatAi() {
                         />
                     }
 
-                    {/* 🟢 MARKET VIEW: Pagination + Metadata (Hours) */}
                     {currentView === 'market' &&
                         <MarketView
                             setCurrentView={setCurrentView}
@@ -492,8 +564,8 @@ export default function EatAi() {
                         />
                     }
 
-                    {currentView === 'orders' && <OrdersView setCurrentView={setCurrentView} user={user} />}
-                    {currentView === 'wallet' && <WalletView setCurrentView={setCurrentView} user={user} />}
+                    {currentView === 'orders' && user && <OrdersView setCurrentView={setCurrentView} user={user} />}
+                    {currentView === 'wallet' && user && <WalletView setCurrentView={setCurrentView} user={user} />}
 
                     {currentView === 'decider' &&
                         <DeciderView
@@ -510,7 +582,6 @@ export default function EatAi() {
                         />
                     }
 
-                    {/* 🟢 DASHBOARDS: Pass dynamic vendors for Super Admin Dropdown */}
                     {currentView === 'admin' && isAdmin &&
                         <AdminView
                             setCurrentView={setCurrentView}
@@ -544,13 +615,14 @@ export default function EatAi() {
                     <div className="fixed bottom-24 right-6 z-50 animate-bounce"><button onClick={() => setCurrentView('logistics')} className="bg-purple-900 text-white font-bold text-sm px-4 py-2 rounded-full shadow-xl flex items-center gap-2 border border-purple-700 hover:bg-purple-800 transition-colors"><Bike className="w-4 h-4" /> Logistics Hub</button></div>
                 )}
 
-                <nav className="flex-none bg-white/90 backdrop-blur-md dark:bg-gray-900/90 border-t border-gray-200 dark:border-gray-800 px-6 py-3 flex justify-around items-center z-40 safe-area-pb">
-                    <button onClick={() => setCurrentView('home')} className={`flex flex-col items-center ${currentView === 'home' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Home className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Home</span></button>
-                    {/* <button onClick={() => setCurrentView('wallet')} className={`flex flex-col items-center ${currentView === 'wallet' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Wallet className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Crypto</span></button> */}
-                    <button onClick={() => setCurrentView('decider')} className={`flex-col items-center hidden md:flex ${currentView === 'decider' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><ChefHat className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Chef</span></button>
-                    <button onClick={() => setCurrentView('location')} className={`flex flex-col items-center ${['location', 'vendors', 'market'].includes(currentView) ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Search className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Market</span></button>
-                    <button onClick={() => setCurrentView('cart')} className={`flex flex-col items-center relative ${currentView === 'cart' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><ShoppingCart className="w-6 h-6" />{cart.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full font-bold">{cart.length}</span>}<span className="text-[10px] mt-1 font-medium">Cart</span></button>
-                </nav>
+                {/* PERSISTENT BOTTOM NAV — visible for guests and logged-in users */}
+                {currentView !== 'login' && (
+                    <nav className="flex-none bg-white/90 backdrop-blur-md dark:bg-gray-900/90 border-t border-gray-200 dark:border-gray-800 px-6 py-3 flex justify-around items-center z-40 safe-area-pb">
+                        <button onClick={() => setCurrentView('home')} className={`flex flex-col items-center ${currentView === 'home' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Home className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Home</span></button>
+                        <button onClick={() => setCurrentView('location')} className={`flex flex-col items-center ${['location', 'vendors', 'market'].includes(currentView) ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Search className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Market</span></button>
+                        <button onClick={() => setCurrentView('cart')} className={`flex flex-col items-center relative ${currentView === 'cart' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><ShoppingCart className="w-6 h-6" />{cart.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full font-bold">{cart.length}</span>}<span className="text-[10px] mt-1 font-medium">Cart</span></button>
+                    </nav>
+                )}
             </div>
         </div>
     );

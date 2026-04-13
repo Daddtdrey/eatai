@@ -1,11 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
     ChefHat, ShoppingBag, Package, Store, ArrowLeft, LogIn,
     ShoppingCart, CreditCard, Wallet, MapPin, Leaf, Beef, Zap, Cookie,
-    X, Minus, Sparkles, Box, Bell, Heart, Flame, Baby, Dumbbell, Plus, Eye,
+    X, Minus, Sparkles, Box, Bell, Heart, Flame, Dumbbell, Plus, Eye,
     Mail, Lock, User, Search, Home, Navigation, ChevronDown, Percent, Trash2, BellRing, CheckCircle, Clock, Edit2, AlertTriangle
 } from 'lucide-react';
 import { usePaystackPayment } from 'react-paystack';
+
+// 🟢 FIX: Sub-component with its own hook so it always initializes with the CORRECT server amount.
+// Using a key prop on this component forces React to fully remount it with fresh values.
+const PaystackTrigger = ({ amount, email, reference, publicKey, onSuccess, onClose }) => {
+    const initializePayment = usePaystackPayment({ 
+        reference, 
+        email, 
+        amount: amount * 100, 
+        publicKey
+    });
+    useEffect(() => { initializePayment(onSuccess, onClose); }, []);
+    return null;
+};
 import { ethers } from 'ethers';
 
 // 🟢 IMPORTS
@@ -15,7 +28,8 @@ import { doc, collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
     signInWithGoogle, createOrder, getUserOrders, saveUserProfile, getUserProfile,
     db, saveWalletToProfile, requestNotificationPermission,
-    signUpWithEmail, logInWithEmail, saveStockRequest, getBanners, functions, resetPassword, deleteUserAccount
+    signUpWithEmail, logInWithEmail, saveStockRequest, getBanners, functions, resetPassword, deleteUserAccount,
+    getReferralCode, getUserCredits, getUserReferralStats
 } from '../firebase.js';
 import { httpsCallable } from "firebase/functions";
 import { LOCATIONS, VENDORS_BY_LOCATION, PAYSTACK_KEY, BANK_DETAILS, calculateDeliveryFee, GEMINI_API_KEY, DELIVERY_ZONES } from '../config.js';
@@ -24,10 +38,124 @@ import { getAutoDeliveryFee, isMultiVendorCart, DEFAULT_PRICING } from '../deliv
 // ==========================================
 // 1.5. 🟢 USER PROFILE OVERLAY
 // ==========================================
-export const ProfileOverlay = ({ user, onClose }) => {
+
+const ReferralView = ({ user }) => {
+    const [stats, setStats] = useState({ referralCode: null, referralCount: 0, totalEarned: 0 });
+    const [creditBalance, setCreditBalance] = useState(0);
+    const [loading, setLoading] = useState(true);
+    const [copied, setCopied] = useState(false);
+
+    useEffect(() => {
+        if (!user) return;
+        Promise.all([
+            getUserReferralStats(user.uid),
+            getUserCredits(user.uid),
+            getReferralCode(user.uid, user.displayName),
+        ]).then(([s, c, code]) => {
+            setStats({ ...s, referralCode: s.referralCode || code });
+            setCreditBalance(c.total);
+            setLoading(false);
+        });
+    }, [user]);
+
+    const handleCopy = () => {
+        if (!stats.referralCode) return;
+        navigator.clipboard.writeText(stats.referralCode).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        });
+    };
+
+    const handleShare = () => {
+        if (!stats.referralCode) return;
+        const shareUrl = `https://eatai.ng/${stats.referralCode}`;
+        if (navigator.share) {
+            navigator.share({
+                title: 'EatAi Referral',
+                text: `Join EatAi and get free credits on your first order! Use my link: ${shareUrl}`,
+                url: shareUrl,
+            });
+        } else {
+            // Provide fallback if share is not supported
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            });
+        }
+    };
+
+    const expiryDays = 35;
+
+    if (loading) return <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full" /></div>;
+
+    return (
+        <div className="space-y-5 pb-6">
+            {/* Code card */}
+            <div className="bg-gradient-to-br from-orange-500 to-red-500 rounded-2xl p-5 text-white shadow-xl shadow-orange-500/30">
+                <p className="text-xs font-bold uppercase tracking-widest opacity-80 mb-1">Your Referral Code</p>
+                <div className="flex items-center gap-3 mt-2">
+                    <span className="text-3xl font-black tracking-widest">{stats.referralCode || '...'}</span>
+                </div>
+                <p className="text-xs opacity-70 mt-2">Share with friends. Both of you earn ₦500 when they order!</p>
+                <div className="flex gap-2 mt-4">
+                    <button onClick={handleCopy} className="flex-1 bg-white/20 backdrop-blur text-white font-bold py-2 rounded-xl text-sm active:scale-95 transition-all">
+                        {copied ? '✅ Copied!' : '📋 Copy Code'}
+                    </button>
+                    <button onClick={handleShare} className="flex-1 bg-white text-orange-600 font-bold py-2 rounded-xl text-sm active:scale-95 transition-all shadow">
+                        🚀 Share
+                    </button>
+                </div>
+            </div>
+
+            {/* Credit balance */}
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-2xl p-4 border border-gray-100 dark:border-gray-700">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">💰 Your Credit Balance</p>
+                <div className="flex items-center justify-between">
+                    <span className="text-3xl font-black text-gray-900 dark:text-white">₦{creditBalance.toLocaleString()}</span>
+                    {creditBalance > 0 && <span className="text-xs text-orange-500 font-bold bg-orange-50 dark:bg-orange-500/10 px-3 py-1 rounded-full">Expires in {expiryDays} days</span>}
+                </div>
+                {creditBalance === 0 && <p className="text-xs text-gray-400 mt-1">Credits appear here after your friend completes their first order.</p>}
+                {creditBalance > 0 && <p className="text-xs text-gray-400 mt-1">Use at checkout on orders ≥ ₦2,500</p>}
+            </div>
+
+            {/* Monthly stats */}
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-2xl p-4 border border-gray-100 dark:border-gray-700">
+                <div className="flex justify-between items-center mb-3">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">📊 This Month</p>
+                    <span className="text-xs font-bold text-gray-400">{stats.referralCount}/15 referrals</span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div className="bg-orange-500 h-2 rounded-full transition-all" style={{ width: `${Math.min((stats.referralCount / 15) * 100, 100)}%` }} />
+                </div>
+                <p className="text-xs text-gray-400 mt-2">Total earned: <b className="text-gray-700 dark:text-gray-200">₦{stats.totalEarned.toLocaleString()}</b></p>
+            </div>
+
+            {/* How it works */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-2xl p-4 border border-blue-100 dark:border-blue-800">
+                <p className="text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wider mb-2">How It Works</p>
+                <div className="space-y-2">
+                    {[
+                        ['1️⃣', 'Share your referral code with a friend'],
+                        ['2️⃣', 'They sign up and enter your code'],
+                        ['3️⃣', 'They place their first order ≥ ₦3,000'],
+                        ['4️⃣', 'You both earn ₦500 credit automatically!'],
+                    ].map(([icon, text]) => (
+                        <div key={text} className="flex items-start gap-2">
+                            <span className="text-sm">{icon}</span>
+                            <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">{text}</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export const ProfileOverlay = ({ user, onClose, setCurrentView }) => {
     const [loading, setLoading] = useState(false);
     const [phone, setPhone] = useState("");
     const [address, setAddress] = useState("");
+    const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'referral' | 'chef'
 
     useEffect(() => {
         if (!user) return;
@@ -64,12 +192,12 @@ export const ProfileOverlay = ({ user, onClose }) => {
     return (
         <div className="fixed inset-0 z-[100] flex animate-fade-in">
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
-            <div className="relative w-4/5 max-w-sm h-full bg-white dark:bg-gray-900 shadow-2xl flex flex-col pt-12 pb-6 px-6 slide-in-left">
+            <div className="relative w-4/5 max-w-sm h-full bg-white dark:bg-gray-900 shadow-2xl flex flex-col pt-12 pb-6 px-6 slide-in-left overflow-y-auto">
                 <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-500 hover:text-gray-900 dark:hover:text-white">
                     <X className="w-5 h-5" />
                 </button>
 
-                <div className="flex flex-col items-center mb-8">
+                <div className="flex flex-col items-center mb-5">
                     <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center border-4 border-white dark:border-gray-800 shadow-lg mb-4 overflow-hidden">
                         <img src={`https://ui-avatars.com/api/?name=${user?.displayName}&background=ffedd5&color=f97316&size=128`} className="w-full h-full object-cover" />
                     </div>
@@ -77,29 +205,54 @@ export const ProfileOverlay = ({ user, onClose }) => {
                     <p className="text-sm text-gray-500">{user?.email}</p>
                 </div>
 
-                <div className="flex-1 space-y-5 overflow-y-auto w-full scrollbar-hide">
-                    <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Phone Number</label>
-                        <div className="relative">
-                            <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="080..." className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white p-3.5 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
+                {/* Tabs */}
+                <div className="flex bg-gray-100 dark:bg-gray-800 rounded-xl p-1 mb-5">
+                    <button onClick={() => setActiveTab('profile')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'profile' ? 'bg-white dark:bg-gray-700 shadow text-gray-900 dark:text-white' : 'text-gray-500'}`}>👤 Profile</button>
+                    <button onClick={() => setActiveTab('referral')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'referral' ? 'bg-white dark:bg-gray-700 shadow text-orange-600' : 'text-gray-500'}`}>🎁 Referrals</button>
+                    <button onClick={() => setActiveTab('chef')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'chef' ? 'bg-white dark:bg-gray-700 shadow text-indigo-600' : 'text-gray-500'}`}>🍳 Chef</button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto scrollbar-hide">
+                    {activeTab === 'profile' ? (
+                        <div className="space-y-5">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Phone Number</label>
+                                <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="080..." className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white p-3.5 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Default Delivery Address</label>
+                                <textarea value={address} onChange={e => setAddress(e.target.value)} placeholder="Room number, Hall/Hostel..." className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white p-3.5 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 resize-none h-24" />
+                            </div>
+                            <button onClick={handleSave} disabled={loading} className="w-full bg-orange-500 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-orange-600 active:scale-95 transition-all outline-none">
+                                {loading ? "Saving..." : "Save Profile"}
+                            </button>
+                            <div className="h-px w-full bg-gray-100 dark:bg-gray-800 my-2"></div>
+                            <button onClick={handleDelete} className="w-full bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400 font-bold py-3.5 rounded-xl border border-red-100 dark:border-red-500/20 hover:bg-red-100 transition-all flex items-center justify-center gap-2">
+                                <Trash2 className="w-5 h-5" /> Delete Account
+                            </button>
                         </div>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Default Delivery Address</label>
-                        <div className="relative">
-                            <textarea value={address} onChange={e => setAddress(e.target.value)} placeholder="Room number, Hall/Hostel..." className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white p-3.5 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 resize-none h-24" />
+                    ) : activeTab === 'referral' ? (
+                        <ReferralView user={user} />
+                    ) : (
+                        <div className="space-y-5">
+                            <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl p-5 text-white shadow-xl shadow-indigo-500/30">
+                                <div className="flex items-center gap-3 mb-3">
+                                    <div className="bg-white/20 p-2.5 rounded-xl"><ChefHat className="w-6 h-6" /></div>
+                                    <div>
+                                        <h3 className="font-black text-lg">AI Chef</h3>
+                                        <p className="text-xs opacity-75">Powered by Gemini AI</p>
+                                    </div>
+                                </div>
+                                <p className="text-sm opacity-90 mb-4">Tell the AI what ingredients you have and get personalised recipe ideas instantly.</p>
+                                <button
+                                    onClick={() => { onClose(); setCurrentView && setCurrentView('decider'); }}
+                                    className="w-full bg-white text-indigo-600 font-bold py-3 rounded-xl text-sm active:scale-95 transition-all shadow"
+                                >
+                                    🍳 Open AI Chef
+                                </button>
+                            </div>
                         </div>
-                    </div>
-                    
-                    <button onClick={handleSave} disabled={loading} className="w-full bg-orange-500 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-orange-600 active:scale-95 transition-all outline-none">
-                        {loading ? "Saving..." : "Save Profile"}
-                    </button>
-                    
-                    <div className="h-px w-full bg-gray-100 dark:bg-gray-800 my-6"></div>
-                    
-                    <button onClick={handleDelete} className="w-full bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400 font-bold py-3.5 rounded-xl border border-red-100 dark:border-red-500/20 hover:bg-red-100 transition-all flex items-center justify-center gap-2">
-                        <Trash2 className="w-5 h-5" /> Delete Account
-                    </button>
+                    )}
                 </div>
             </div>
         </div>
@@ -109,11 +262,13 @@ export const ProfileOverlay = ({ user, onClose }) => {
 // ==========================================
 // 1. 🟢 REDESIGNED LOGIN VIEW (Full Screen + Background)
 // ==========================================
-export const LoginView = () => {
-    const [isSignUp, setIsSignUp] = useState(false);
+export const LoginView = ({ defaultMode = 'signup' }) => {
+    const [isSignUp, setIsSignUp] = useState(defaultMode !== 'login');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [name, setName] = useState('');
+    const [referralCode, setReferralCode] = useState(() => localStorage.getItem('eatai_pending_referral') || '');
+    const [referralValid, setReferralValid] = useState(null); // null | true | false
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -137,7 +292,10 @@ export const LoginView = () => {
         setLoading(true);
         setError('');
         try {
-            if (isSignUp) { await signUpWithEmail(email, password, name); }
+            if (isSignUp) { 
+                await signUpWithEmail(email, password, name, referralCode.trim() || null); 
+                localStorage.removeItem('eatai_pending_referral');
+            }
             else { await logInWithEmail(email, password); }
         } catch (err) {
             console.error(err);
@@ -145,6 +303,20 @@ export const LoginView = () => {
         }
         finally { setLoading(false); }
     };
+
+    // Validate referral code on change (debounced check)
+    useEffect(() => {
+        if (!referralCode.trim() || !isSignUp) { setReferralValid(null); return; }
+        const timeout = setTimeout(async () => {
+            try {
+                const { getDoc, doc } = await import('firebase/firestore');
+                const { db } = await import('../firebase.js');
+                const snap = await getDoc(doc(db, 'referralCodes', referralCode.trim().toUpperCase()));
+                setReferralValid(snap.exists());
+            } catch { setReferralValid(false); }
+        }, 600);
+        return () => clearTimeout(timeout);
+    }, [referralCode, isSignUp]);
 
     return (
         // 🟢 FULL SCREEN BACKGROUND CONTAINER
@@ -180,8 +352,27 @@ export const LoginView = () => {
                         <Lock className="absolute left-3 top-3.5 w-5 h-5 text-gray-400" />
                         <input type="password" placeholder="Password" className="w-full pl-10 p-3.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 outline-none transition-all" value={password} onChange={(e) => setPassword(e.target.value)} required />
                     </div>
-                    
+
+                    {/* 🎁 Referral code — signup only */}
+                    {isSignUp && (
+                        <div className="relative">
+                            <span className="absolute left-3 top-3.5 text-base">🎁</span>
+                            <input
+                                type="text"
+                                placeholder="Referral code (optional)"
+                                className={`w-full pl-10 pr-16 p-3.5 rounded-xl bg-black/40 border text-white placeholder-gray-400 focus:ring-1 outline-none transition-all uppercase font-bold tracking-wider text-sm
+                                    ${referralValid === true ? 'border-green-500 focus:ring-green-500' : referralValid === false ? 'border-red-500 focus:ring-red-500' : 'border-white/10 focus:border-orange-500 focus:ring-orange-500'}`}
+                                value={referralCode}
+                                onChange={e => setReferralCode(e.target.value.toUpperCase())}
+                                maxLength={9}
+                            />
+                            {referralValid === true && <span className="absolute right-3 top-3.5 text-green-400 text-sm font-bold">✅</span>}
+                            {referralValid === false && <span className="absolute right-3 top-3.5 text-red-400 text-xs font-bold">✗</span>}
+                        </div>
+                    )}
+
                     {!isSignUp && (
+
                         <div className="flex justify-end">
                             <button type="button" onClick={handleResetPassword} className="text-sm font-bold text-orange-400 hover:text-orange-300">
                                 Forgot Password?
@@ -223,7 +414,7 @@ export const LoginView = () => {
 };
 
 // --- 2. HOME VIEW ---
-export const HomeView = ({ setCurrentView, user, setVendor, setCity, vendorsByLocation, vendorMetadata }) => {
+export const HomeView = ({ setCurrentView, user, setVendor, setCity, vendorsByLocation, vendorMetadata, marketData = [], addToCart, loadingData }) => {
     const [hasPermission, setHasPermission] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [banners, setBanners] = useState([]);
@@ -316,12 +507,18 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity, vendorsByLo
                     <div>
                         <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">{greeting},</p>
                         <h1 className="text-2xl font-black text-gray-900 dark:text-white flex items-center gap-2 font-[Fredoka]">
-                            {user?.displayName?.split(' ')[0]} 👋
+                            {user ? user.displayName?.split(' ')[0] : 'Guest'} 👋
                         </h1>
                     </div>
-                    <div onClick={() => setShowProfile(true)} className="w-10 h-10 cursor-pointer active:scale-95 transition-transform bg-orange-100 dark:bg-gray-800 rounded-full flex items-center justify-center border-2 border-white dark:border-gray-700 shadow-sm overflow-hidden">
-                        <img src={`https://ui-avatars.com/api/?name=${user?.displayName}&background=ffedd5&color=f97316`} alt="User" />
-                    </div>
+                    {user ? (
+                        <div onClick={() => setShowProfile(true)} className="w-10 h-10 cursor-pointer active:scale-95 transition-transform bg-orange-100 dark:bg-gray-800 rounded-full flex items-center justify-center border-2 border-white dark:border-gray-700 shadow-sm overflow-hidden">
+                            <img src={`https://ui-avatars.com/api/?name=${user?.displayName}&background=ffedd5&color=f97316`} alt="User" />
+                        </div>
+                    ) : (
+                        <button onClick={() => setCurrentView('login')} className="w-10 h-10 bg-orange-100 dark:bg-gray-800 rounded-full flex items-center justify-center border-2 border-white dark:border-gray-700 shadow-sm text-orange-500 active:scale-95 transition-transform">
+                            <User className="w-5 h-5" />
+                        </button>
+                    )}
                 </div>
 
                 {/* SEARCH BAR */}
@@ -420,40 +617,119 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity, vendorsByLo
                     </div>
                 </div>
 
-                {/* QUICK ACTIONS */}
-                <div>
-                    <h3 className="text-gray-900 dark:text-white font-bold text-lg mb-3 font-[Fredoka]">Quick Actions</h3>
-                    <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => setCurrentView('decider')} className="bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all hover:border-indigo-200">
-                            <div className="bg-white dark:bg-indigo-600 p-2.5 rounded-full shadow-sm text-indigo-600 dark:text-white"><ChefHat className="w-5 h-5" /></div>
-                            <span className="font-bold text-indigo-900 dark:text-indigo-200 text-sm">AI Chef</span>
-                        </button>
-                        <button onClick={() => setCurrentView('orders')} className="bg-emerald-50 dark:bg-emerald-900/10 p-4 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all hover:border-emerald-200">
-                            <div className="bg-white dark:bg-emerald-600 p-2.5 rounded-full shadow-sm text-emerald-600 dark:text-white"><Package className="w-5 h-5" /></div>
-                            <span className="font-bold text-emerald-900 dark:text-emerald-200 text-sm">My Orders</span>
-                        </button>
-                        <button onClick={() => setCurrentView('wallet')} className="bg-purple-50 dark:bg-purple-900/10 p-4 rounded-2xl border border-purple-100 dark:border-purple-900/30 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all hover:border-purple-200">
-                            <div className="bg-white dark:bg-purple-600 p-2.5 rounded-full shadow-sm text-purple-600 dark:text-white"><Wallet className="w-5 h-5" /></div>
-                            <span className="font-bold text-purple-900 dark:text-purple-200 text-sm">Wallet</span>
-                        </button>
-                        {!hasPermission ? (
-                            <button onClick={handleNotificationClick} className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-2xl border border-blue-100 dark:border-blue-900/30 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all hover:border-blue-200 animate-pulse">
-                                <div className="bg-white dark:bg-blue-600 p-2.5 rounded-full shadow-sm text-blue-600 dark:text-white"><Bell className="w-5 h-5" /></div>
-                                <span className="font-bold text-blue-900 dark:text-blue-200 text-sm">Enable Alerts</span>
-                            </button>
-                        ) : (
-                            <button onClick={() => setCurrentView('location')} className="bg-orange-50 dark:bg-orange-900/10 p-4 rounded-2xl border border-orange-100 dark:border-orange-900/30 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all hover:border-orange-200">
-                                <div className="bg-white dark:bg-orange-600 p-2.5 rounded-full shadow-sm text-orange-600 dark:text-white"><Store className="w-5 h-5" /></div>
-                                <span className="font-bold text-orange-900 dark:text-orange-200 text-sm">Vendors</span>
-                            </button>
-                        )}
-                    </div>
-                </div>
+                {/* NOTIFICATION PROMPT — only shown to logged-in users who haven't granted */}
+                {user && !hasPermission && (
+                    <button
+                        onClick={handleNotificationClick}
+                        className="w-full flex items-center gap-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl px-4 py-3 active:scale-95 transition-all"
+                    >
+                        <div className="bg-blue-100 dark:bg-blue-800 p-2 rounded-full text-blue-600 dark:text-blue-300 animate-pulse shrink-0"><Bell className="w-4 h-4" /></div>
+                        <div className="text-left">
+                            <p className="text-sm font-bold text-blue-800 dark:text-blue-200">Enable order alerts</p>
+                            <p className="text-xs text-blue-500 dark:text-blue-400">Get notified when your food is ready</p>
+                        </div>
+                        <span className="ml-auto text-xs font-bold text-blue-500 dark:text-blue-400 shrink-0">Enable →</span>
+                    </button>
+                )}
+
+                {/* FEATURED PICKS */}
+                {(() => {
+                    const featured = marketData.filter(item => item.featured);
+                    if (featured.length === 0) return null;
+                    return (
+                        <div>
+                            <div className="flex justify-between items-center mb-2">
+                                <h3 className="text-gray-900 dark:text-white font-bold text-lg font-[Fredoka] flex items-center gap-1">⭐ Featured Picks</h3>
+                                <span onClick={() => setCurrentView('market')} className="text-orange-500 text-[10px] font-bold cursor-pointer hover:underline">See all</span>
+                            </div>
+                            <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 -mx-1 px-1">
+                                {featured.map((item, idx) => (
+                                    <div key={item.id || idx} className="shrink-0 w-40 bg-white dark:bg-gray-900 border-2 border-orange-200 dark:border-orange-800 rounded-2xl overflow-hidden shadow-md shadow-orange-500/10 active:scale-95 transition-transform relative">
+                                        <span className="absolute top-2 left-2 bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full z-10">⭐ Featured</span>
+                                        <div className="w-full h-24 bg-gray-100 dark:bg-gray-800 overflow-hidden">
+                                            {item.imageUrl ? (
+                                                <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center text-3xl">{item.image || '🍽️'}</div>
+                                            )}
+                                        </div>
+                                        <div className="p-2.5">
+                                            <p className="text-xs font-bold text-gray-800 dark:text-white leading-tight line-clamp-1 mb-0.5">{item.name}</p>
+                                            <p className="text-[10px] text-gray-400 mb-1">{item.vendor}</p>
+                                            <p className="text-xs font-black text-orange-500 mb-2">₦{(item.price || 0).toLocaleString()}</p>
+                                            <button
+                                                onClick={() => addToCart && addToCart({ ...item, quantity: 1 })}
+                                                className="w-full bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1 active:scale-95"
+                                            >
+                                                <Plus className="w-3 h-3" /> Add to Cart
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                })()}
+
+                {/* VENDOR MENU FEED */}
+                {(() => {
+                    if (loadingData) return (
+                        <div>
+                            <h3 className="text-gray-900 dark:text-white font-bold text-lg mb-3 font-[Fredoka]">From Our Vendors</h3>
+                            <div className="flex gap-3 overflow-x-auto pb-2">
+                                {[1,2,3].map(i => <div key={i} className="shrink-0 w-36 h-44 rounded-2xl bg-gray-200 dark:bg-gray-800 animate-pulse" />)}
+                            </div>
+                        </div>
+                    );
+                    // Group items by vendor
+                    const grouped = {};
+                    marketData.forEach(item => {
+                        const v = item.vendor || 'Other';
+                        if (!grouped[v]) grouped[v] = [];
+                        grouped[v].push(item);
+                    });
+                    const vendorNames = Object.keys(grouped);
+                    if (vendorNames.length === 0) return null;
+                    return vendorNames.map(vendorName => (
+                        <div key={vendorName}>
+                            <div className="flex justify-between items-center mb-2">
+                                <h3 className="text-gray-900 dark:text-white font-bold text-base font-[Fredoka]">{vendorName}</h3>
+                                <span
+                                    onClick={() => { setCity && setCity(Object.keys(vendorsByLocation || {}).find(loc => (vendorsByLocation[loc] || []).includes(vendorName)) || null); setVendor && setVendor(vendorName); setCurrentView('market'); }}
+                                    className="text-orange-500 text-[10px] font-bold cursor-pointer hover:underline"
+                                >See all</span>
+                            </div>
+                            <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 -mx-1 px-1">
+                                {grouped[vendorName].map((item, idx) => (
+                                    <div key={item.id || idx} className="shrink-0 w-36 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl overflow-hidden shadow-sm active:scale-95 transition-transform">
+                                        <div className="w-full h-24 bg-gray-100 dark:bg-gray-800 relative overflow-hidden">
+                                            {item.imageUrl ? (
+                                                <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center text-3xl">{item.image || '🍽️'}</div>
+                                            )}
+                                        </div>
+                                        <div className="p-2.5">
+                                            <p className="text-xs font-bold text-gray-800 dark:text-white leading-tight line-clamp-2 mb-1">{item.name}</p>
+                                            <p className="text-xs font-black text-orange-500 mb-2">₦{(item.price || 0).toLocaleString()}</p>
+                                            <button
+                                                onClick={() => addToCart && addToCart({ ...item, quantity: 1 })}
+                                                className="w-full bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1 active:scale-95"
+                                            >
+                                                <Plus className="w-3 h-3" /> Add
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ));
+                })()}
 
             </div>
 
             {/* OVERLAYS MOUNTED AT ROOT TO PREVENT CSS CLIPPING */}
-            {showProfile && <ProfileOverlay user={user} onClose={() => setShowProfile(false)} />}
+            {showProfile && <ProfileOverlay user={user} onClose={() => setShowProfile(false)} setCurrentView={setCurrentView} />}
 
         </div>
     );
@@ -635,7 +911,7 @@ export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData,
         return locationMatch && vendorMatch && categoryMatch;
     });
 
-    const categories = [{ id: 'All', label: 'All', icon: null }, { id: 'fullMeal', label: 'Meals', icon: ShoppingBag }, { id: 'cravings', label: 'Cravings', icon: Heart }, { id: 'pregnancy', label: 'Pregnancy', icon: Baby }];
+    const categories = [{ id: 'All', label: 'All', icon: null }, { id: 'drinks', label: 'Drinks', icon: Zap }, { id: 'snacks', label: 'Snacks', icon: Cookie }];
 
     return (
         <ViewContainer title={`${vendor} Menu`} showBack onBack={() => setCurrentView('vendors')}>
@@ -647,6 +923,17 @@ export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData,
                         <span className="font-bold text-sm">
                             {isManuallyOffline ? "Store is currently Offline" : `Closed (Opens ${vendorInfo.openTime || "8:00"})`}
                         </span>
+                    </div>
+                </div>
+            )}
+
+            {/* 🟢 VENDOR HEADER METADATA */}
+            {isOpen && vendorInfo.avgWaitTime && (
+                <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 rounded-xl p-3 mb-4 flex items-center gap-2 shadow-sm">
+                    <Clock className="w-5 h-5 text-blue-500" />
+                    <div>
+                        <span className="font-bold text-sm text-blue-800 dark:text-blue-300">Prep time: ~{vendorInfo.avgWaitTime} mins</span>
+                        <span className="text-[10px] text-blue-400 dark:text-blue-500 block">Total delivery: ~{parseInt(vendorInfo.avgWaitTime) + 15}–{parseInt(vendorInfo.avgWaitTime) + 35} mins</span>
                     </div>
                 </div>
             )}
@@ -780,7 +1067,7 @@ export const OrdersView = ({ setCurrentView, user }) => {
             {selectedOrder && <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} onRate={handleRateProduct} />}
             {loading ? <div className="flex justify-center p-10"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div> : orders.length === 0 ? <div className="text-center mt-10 text-gray-400"><Package className="w-16 h-16 mx-auto mb-4 opacity-20" /><p>No orders yet.</p></div> : <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide space-y-3">{orders.map(order => (<div key={order.id} className="bg-white dark:bg-gray-900 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
                 <div onClick={() => setSelectedOrder(order)} className="cursor-pointer active:scale-95 transition-transform">
-                    <div className="flex justify-between mb-2"><span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-wider ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : order.status === 'picked_up' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>{order.status.replace('_', ' ')}</span><span className="text-xs text-gray-400 font-mono">#{order.id.slice(0, 6)}</span></div>
+                    <div className="flex justify-between mb-2"><span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-wider ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : order.status === 'ready' ? 'bg-orange-100 text-orange-700 animate-pulse' : order.status === 'picked_up' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>{order.status === 'ready' ? '🍽️ Food Ready! Rider on the way' : order.status.replace('_', ' ')}</span><span className="text-xs text-gray-400 font-mono">#{order.id.slice(0, 6)}</span></div>
                     <div className="flex justify-between items-end"><div><p className="font-bold dark:text-white text-sm">{order.items.length} Items</p><p className="text-xs text-gray-500">{new Date(order.createdAt).toLocaleDateString()}</p></div><div className="text-right"><p className="font-black text-orange-500 text-lg">₦{order.total.toLocaleString()}</p><p className="text-[10px] text-gray-400 font-medium">Tap for details</p></div></div>
                 </div>
                 {/* 🟢 RETRY: Show Pay Now button for pending Paystack orders */}
@@ -909,6 +1196,34 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
     const [secureTotals, setSecureTotals] = useState(null);
     const [calculatingTotals, setCalculatingTotals] = useState(false);
 
+    // 🎁 Credit State
+    const [creditBalance, setCreditBalance] = useState(0);
+    const [useCredits, setUseCredits] = useState(false);
+
+    // Load credit balance on mount
+    useEffect(() => {
+        if (user?.uid) {
+            import('../firebase.js').then(({ getUserCredits }) => {
+                getUserCredits(user.uid).then(({ total }) => setCreditBalance(total));
+            });
+        }
+    }, [user]);
+
+    // 🟢 Calculate Max Wait Time
+    const maxWaitTime = useMemo(() => {
+        let max = 0;
+        cart.forEach(item => {
+            if (item.vendor && vendorMetadata && vendorMetadata[item.vendor]) {
+                const vendorInfo = vendorMetadata[item.vendor];
+                if (vendorInfo.avgWaitTime) {
+                    const wait = parseInt(vendorInfo.avgWaitTime);
+                    if (wait > max) max = wait;
+                }
+            }
+        });
+        return max;
+    }, [cart, vendorMetadata]);
+
     // 🟢 Reverse geocode coords using OpenStreetMap Nominatim (free, no API key)
     const reverseGeocode = async (lat, lng) => {
         try {
@@ -959,6 +1274,22 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
     // 🟢 Delivery fee: auto distance if coords captured, else base fee
     const handleUseGPS = () => {
         if (!navigator.geolocation) return alert("Geolocation not supported on this device.");
+
+        // Try cached coords first — saves iOS users from repeated permission prompts
+        try {
+            const cached = localStorage.getItem('eatai_last_coords');
+            if (cached) {
+                const { lat, lng } = JSON.parse(cached);
+                setCustomerCoords({ lat, lng });
+                setGpsState('success');
+                reverseGeocode(lat, lng).then(addr => {
+                    setDetectedAddress(addr);
+                    setForm(prev => ({ ...prev, address: prev.address || addr }));
+                });
+                return;
+            }
+        } catch { /* ignore */ }
+
         setGpsState('loading');
         setShowAddressSearch(false);
         navigator.geolocation.getCurrentPosition(
@@ -966,16 +1297,17 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
                 const { latitude: lat, longitude: lng } = pos.coords;
                 setCustomerCoords({ lat, lng });
                 setGpsState('success');
-                // Reverse geocode in background
+                // Cache for future sessions
+                try { localStorage.setItem('eatai_last_coords', JSON.stringify({ lat, lng })); } catch { }
                 const addr = await reverseGeocode(lat, lng);
                 setDetectedAddress(addr);
-                // Auto-fill the address field if it's empty
                 setForm(prev => ({ ...prev, address: prev.address || addr }));
             },
             () => {
                 setGpsState('denied');
             },
-            { enableHighAccuracy: true, timeout: 10000 }
+            // enableHighAccuracy: false is essential on older iOS to avoid GPS timeout
+            { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }
         );
     };
 
@@ -991,12 +1323,8 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
     // Pre-generate unique order ID
     const [orderId] = useState(() => `eatai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
 
-    const initializePayment = usePaystackPayment({
-        reference: orderId,
-        email: user?.email,
-        amount: (secureTotals ? secureTotals.grandTotal : displayGrandTotal) * 100,
-        publicKey: PAYSTACK_KEY,
-    });
+    // PaystackTrigger is rendered conditionally (see JSX below) — no stale hook here
+    const [paystackConfig, setPaystackConfig] = useState(null);
 
     const handleApplyPromoCode = async () => {
         if (!promoCode.trim()) return;
@@ -1030,7 +1358,7 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
         const unsubscribe = onSnapshot(doc(db, 'orders', orderId), (snapshot) => {
             if (snapshot.exists() && snapshot.data().status === 'confirmed') {
                 setPaymentStage('confirmed');
-                setTimeout(() => onSuccess(), 2000);
+                setTimeout(() => onSuccess(orderId), 2000);
             }
         });
         return () => unsubscribe();
@@ -1043,10 +1371,13 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
 
         setProcessing(true);
         try {
+            // Amount of credits to apply
+            const creditsToApply = (useCredits && creditBalance > 0) ? creditBalance : 0;
+
             // SECURE MATH VERIFICATION
             const calcFunc = httpsCallable(functions, 'calculateCheckoutTotals');
             const result = await calcFunc({
-                cart, customerCoords: activeCoords || null, deliveryType: orderType, promoCode: appliedPromo || null
+                cart, customerCoords: activeCoords || null, deliveryType: orderType, promoCode: appliedPromo || null, creditsApplied: creditsToApply
             });
 
             const finalGrandTotal = result.data.grandTotal;
@@ -1066,10 +1397,13 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
                 await saveUserProfile(user.uid, { address: form.address, phone: form.phone, landmark: form.landmark });
                 setProcessing(false);
                 setPaymentStage('waiting');
-                initializePayment(
-                    (response) => { console.log('✅ Paystack payment complete:', response); },
-                    () => { setPaymentStage('closed'); }
-                );
+                // 🟢 FIX: Mount PaystackTrigger with the fresh server-verified amount
+                setPaystackConfig({
+                    amount: finalGrandTotal,
+                    email: user.email,
+                    reference: orderId,
+                    publicKey: PAYSTACK_KEY,
+                });
             } else {
                 await new Promise(r => setTimeout(r, 1500));
                 await createOrder(
@@ -1079,7 +1413,7 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
                 );
                 await saveUserProfile(user.uid, { address: form.address, phone: form.phone, landmark: form.landmark });
                 setProcessing(false);
-                onSuccess();
+                onSuccess(orderId);
             }
         } catch (e) {
             setProcessing(false);
@@ -1089,6 +1423,18 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
 
     return (
         <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
+            {/* 🟢 FIX: PaystackTrigger mounts fresh with key=amount so it ALWAYS charges the correct server total */}
+            {paystackConfig && (
+                <PaystackTrigger
+                    key={paystackConfig.amount}
+                    amount={paystackConfig.amount}
+                    email={paystackConfig.email}
+                    reference={paystackConfig.reference}
+                    publicKey={paystackConfig.publicKey}
+                    onSuccess={(response) => { console.log('✅ Paystack payment complete:', response); }}
+                    onClose={() => { setPaymentStage('closed'); setPaystackConfig(null); }}
+                />
+            )}
             <div className="bg-white dark:bg-gray-900 w-full max-w-lg p-6 rounded-t-3xl md:rounded-3xl shadow-2xl relative max-h-[90vh] overflow-y-auto">
                 <button onClick={onClose} className="absolute top-4 right-4 z-10"><X className="w-5 h-5" /></button>
 
@@ -1181,17 +1527,30 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
                                     </div>
                                 ) : null}
 
-                                {/* GPS DENIED or missing: strict enforcement */}
+                                {/* GPS DENIED or missing: with iOS instructions */}
                                 {(gpsState === 'denied' || (!globalCustomerCoords && gpsState !== 'success')) && (
-                                    <div className="space-y-4 text-center p-4 bg-gray-50 border rounded-xl dark:bg-gray-800 dark:border-gray-700 mb-4 mt-2">
-                                        <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 text-red-500 rounded-full flex items-center justify-center mx-auto mb-2">
-                                            <Navigation className="w-6 h-6" />
+                                    <div className="space-y-3 p-4 bg-gray-50 border rounded-xl dark:bg-gray-800 dark:border-gray-700 mb-4 mt-2">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 text-red-500 rounded-full flex items-center justify-center shrink-0">
+                                                <Navigation className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <h4 className="font-bold text-gray-800 dark:text-gray-200 text-sm">Location needed for delivery fee</h4>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">We need your location to calculate pricing.</p>
+                                            </div>
                                         </div>
-                                        <h4 className="font-bold text-gray-800 dark:text-gray-200">Location Required</h4>
-                                        <p className="text-xs text-gray-500">We strictly need your GPS location to calculate accurate delivery pricing. Please allow location access to continue.</p>
-                                        <button onClick={handleUseGPS} disabled={gpsState === 'loading'} className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-bold shadow-lg disabled:opacity-50 transition">
-                                            {gpsState === 'loading' ? 'Locating...' : 'Grant GPS Access'}
+                                        <button onClick={handleUseGPS} disabled={gpsState === 'loading'} className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-bold shadow-lg disabled:opacity-50 transition text-sm">
+                                            {gpsState === 'loading' ? '⏳ Detecting location...' : '📍 Use My Location'}
                                         </button>
+                                        {gpsState === 'denied' && (
+                                            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                                                <p className="font-bold">📱 On iPhone? Here's how to fix it:</p>
+                                                <p>1. Go to <b>Settings → Safari → Location</b></p>
+                                                <p>2. Set to <b>"Ask"</b> or <b>"Allow"</b></p>
+                                                <p>3. Come back and tap "Use My Location" again</p>
+                                                <p className="text-amber-600 dark:text-amber-400 mt-1">Or type your address manually below ↓</p>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -1206,7 +1565,14 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
 
                 {/* ORDER SUMMARY */}
                 <div className="mt-4 bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
-                    <p className="text-[10px] text-gray-400 font-bold uppercase mb-2">Order Summary</p>
+                    <div className="flex justify-between items-center mb-2">
+                        <p className="text-[10px] text-gray-400 font-bold uppercase">Order Summary</p>
+                        {maxWaitTime > 0 && orderType === 'delivery' && (
+                            <span className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1">
+                                <Clock className="w-3 h-3" /> ~{maxWaitTime} mins delivery
+                            </span>
+                        )}
+                    </div>
                     <div className="space-y-2 max-h-40 overflow-y-auto scrollbar-hide">
                         {cart.map((item, i) => {
                             const addonsTotal = item.selectedAddons ? item.selectedAddons.reduce((s, a) => s + (a.price || 0), 0) : 0;
@@ -1246,10 +1612,29 @@ export const PaymentModal = ({ isOpen, onClose, total, paymentMethod, user, cart
                             <span>- ₦{secureTotals.discount.toLocaleString()}</span>
                         </div>
                     )}
+                    
+                    {/* CREDITS TOGGLE */}
+                    {creditBalance > 0 && (
+                        <div className={`p-3 rounded-lg flex items-center justify-between border transition-all cursor-pointer ${useCredits ? 'bg-orange-50 border-orange-200 dark:bg-orange-900/20 dark:border-orange-800' : 'bg-white border-gray-200 dark:bg-gray-800 dark:border-gray-700'}`} onClick={() => { setUseCredits(!useCredits); setSecureTotals(null); }}>
+                            <div>
+                                <p className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1">🎁 Use Credits</p>
+                                <p className="text-[10px] text-gray-500">Balance: ₦{creditBalance.toLocaleString()}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className={`text-xs font-bold ${useCredits ? 'text-orange-600' : 'text-gray-400'}`}>
+                                    - ₦{(Math.min(estimatedTotal, creditBalance)).toLocaleString()}
+                                </span>
+                                <div className={`w-8 h-4 rounded-full flex items-center px-0.5 transition-colors ${useCredits ? 'bg-orange-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                                    <div className={`w-3 h-3 bg-white rounded-full transition-transform ${useCredits ? 'translate-x-4' : 'translate-x-0'}`} />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex justify-between items-center mt-2 pt-3 border-t dark:border-gray-700">
                         <div className="text-sm font-bold text-gray-700 dark:text-gray-300">Grand Total:</div>
                         <div className="text-2xl font-black text-orange-600">
-                            ₦{displayGrandTotal.toLocaleString()}
+                            ₦{useCredits && !secureTotals ? Math.max(0, displayGrandTotal - creditBalance).toLocaleString() : displayGrandTotal.toLocaleString()}
                         </div>
                     </div>
                 </div>
@@ -1321,9 +1706,68 @@ const isVendorOpen = (vendorName, vendorMetadata) => {
     return current >= open && current < close;
 };
 
+
+// ==========================================
+// ORDER CONFIRMED MODAL
+// ==========================================
+const OrderConfirmedModal = ({ onClose, waitTime, orderId }) => {
+    const [visible, setVisible] = useState(false);
+    useEffect(() => { setTimeout(() => setVisible(true), 60); }, []);
+    return (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)' }}>
+            <div style={{ width: '100%', maxWidth: '480px', background: 'linear-gradient(160deg, #0a1832 0%, #050d1f 100%)', borderRadius: '28px 28px 0 0', padding: '36px 28px 52px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '18px', transform: visible ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 0.45s cubic-bezier(0.34,1.56,0.64,1)', boxShadow: '0 -8px 48px rgba(249,115,22,0.2)', border: '1px solid rgba(249,115,22,0.15)', fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+                <div style={{ width: '40px', height: '4px', borderRadius: '4px', background: 'rgba(255,255,255,0.15)', marginBottom: '4px' }} />
+                <div style={{ width: '88px', height: '88px', borderRadius: '50%', background: 'linear-gradient(135deg, rgba(249,115,22,0.18), rgba(29,78,216,0.18))', border: '2.5px solid rgba(249,115,22,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 32px rgba(249,115,22,0.3), 0 0 64px rgba(249,115,22,0.1)', animation: 'pulse-ring 2s ease-in-out infinite' }}>
+                    <div style={{ fontSize: '2.8rem', lineHeight: 1 }}>✅</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                    <h2 style={{ fontSize: '1.5rem', fontWeight: 900, color: '#fff', margin: '0 0 6px', letterSpacing: '-0.5px' }}>Order Received! 🎉</h2>
+                    <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.88rem', margin: 0 }}>Your order is confirmed and being prepared.</p>
+                </div>
+                {waitTime > 0 && (
+                    <div style={{ width: '100%', background: 'linear-gradient(135deg, rgba(249,115,22,0.14), rgba(29,78,216,0.14))', border: '1.5px solid rgba(249,115,22,0.3)', borderRadius: '18px', padding: '18px 20px', display: 'flex', alignItems: 'center', gap: '14px', backdropFilter: 'blur(8px)' }}>
+                        <div style={{ fontSize: '2rem', lineHeight: 1 }}>🛵</div>
+                        <div>
+                            <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.7rem', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', margin: '0 0 3px' }}>Rider ETA</p>
+                            <p style={{ color: '#fff', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>Your rider will call you within <span style={{ background: 'linear-gradient(90deg, #f97316, #fb923c)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>{waitTime} minutes</span></p>
+                        </div>
+                    </div>
+                )}
+                {orderId && (
+                    <div style={{ width: '100%', background: 'rgba(255,255,255,0.04)', borderRadius: '12px', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid rgba(255,255,255,0.07)' }}>
+                        <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase' }}>Order ID</span>
+                        <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.75rem', fontFamily: 'monospace', letterSpacing: '1px' }}>{orderId.slice(-10).toUpperCase()}</span>
+                    </div>
+                )}
+                <button onClick={onClose} style={{ width: '100%', maxWidth: '360px', padding: '16px', borderRadius: '16px', border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: '1rem', background: 'linear-gradient(135deg, #f97316, #ea580c)', color: '#fff', boxShadow: '0 8px 24px rgba(249,115,22,0.4)', transition: 'all 0.15s' }} onMouseDown={e => e.currentTarget.style.transform='scale(0.97)'} onMouseUp={e => e.currentTarget.style.transform='scale(1)'} onTouchStart={e => e.currentTarget.style.transform='scale(0.97)'} onTouchEnd={e => e.currentTarget.style.transform='scale(1)'}>
+                    📦 Track My Order
+                </button>
+                <style>{`@keyframes pulse-ring { 0%,100%{box-shadow:0 0 32px rgba(249,115,22,0.3),0 0 64px rgba(249,115,22,0.1)}50%{box-shadow:0 0 48px rgba(249,115,22,0.55),0 0 96px rgba(249,115,22,0.18)} }`}</style>
+            </div>
+        </div>
+    );
+};
+
 export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, removeFromCart, cartTotal, globalWallet, user, setCart, city, vendorMetadata, vendor, deliveryPricingConfig, globalCustomerCoords }) => {
     const [paymentMethod, setPaymentMethod] = useState('paystack');
     const [showModal, setShowModal] = useState(false);
+    const [confirmedOrder, setConfirmedOrder] = useState(null);
+
+    // Compute max wait time across vendors in cart
+    const cartMaxWaitTime = useMemo(() => {
+        let max = 0;
+        cart.forEach(item => {
+            const meta = vendorMetadata?.[item.vendor];
+            if (meta?.avgWaitTime) { const t = parseInt(meta.avgWaitTime); if (t > max) max = t; }
+        });
+        return max;
+    }, [cart, vendorMetadata]);
+
+    const handleOrderSuccess = (placedOrderId) => {
+        setShowModal(false);
+        setCart([]);
+        setConfirmedOrder({ orderId: placedOrderId, waitTime: cartMaxWaitTime });
+    };
 
     // Check if every vendor in the cart is currently open
     const closedVendors = [...new Set(cart.map(item => item.vendor).filter(Boolean))]
@@ -1332,7 +1776,14 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
 
     return (
         <>
-            <PaymentModal isOpen={showModal} onClose={() => setShowModal(false)} total={cartTotal} paymentMethod={paymentMethod} user={user} cart={cart} globalWallet={globalWallet} onSuccess={() => { setShowModal(false); setCart([]); setCurrentView('orders'); alert("Order Placed!"); }} city={city} vendorMetadata={vendorMetadata} vendor={vendor} deliveryPricingConfig={deliveryPricingConfig} globalCustomerCoords={globalCustomerCoords} />
+            {confirmedOrder && (
+                <OrderConfirmedModal
+                    orderId={confirmedOrder.orderId}
+                    waitTime={confirmedOrder.waitTime}
+                    onClose={() => { setConfirmedOrder(null); setCurrentView('orders'); }}
+                />
+            )}
+            <PaymentModal isOpen={showModal} onClose={() => setShowModal(false)} total={cartTotal} paymentMethod={paymentMethod} user={user} cart={cart} globalWallet={globalWallet} onSuccess={handleOrderSuccess} city={city} vendorMetadata={vendorMetadata} vendor={vendor} deliveryPricingConfig={deliveryPricingConfig} globalCustomerCoords={globalCustomerCoords} />
             <div className="fixed inset-0 z-50 flex justify-end pointer-events-none">
                 <div className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${currentView === 'cart' ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`} onClick={() => setCurrentView(marketSection ? 'market' : 'home')} />
                 <div className={`relative bg-white dark:bg-gray-900 shadow-2xl w-full max-w-md h-full flex flex-col pointer-events-auto transition-transform duration-300 transform ${currentView === 'cart' ? 'translate-x-0' : 'translate-x-full'}`}>
@@ -1345,6 +1796,17 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
                         {cart.length > 0 && (
                             <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-xl flex">
                                 <button onClick={() => setPaymentMethod('paystack')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${paymentMethod === 'paystack' ? 'bg-white shadow dark:bg-gray-700 dark:text-white' : 'text-gray-500'}`}><CreditCard className="w-4 h-4" /> Paystack</button>
+                            </div>
+                        )}
+                        {/* DELIVERY ETA BANNER */}
+                        {cart.length > 0 && cartMaxWaitTime > 0 && (
+                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-xl px-4 py-3 flex items-center gap-3">
+                                <Clock className="w-5 h-5 text-blue-500 shrink-0" />
+                                <div>
+                                    <p className="text-xs font-black text-blue-800 dark:text-blue-200">Estimated Delivery</p>
+                                    <p className="text-sm font-bold text-blue-600 dark:text-blue-300">~{cartMaxWaitTime + 15}–{cartMaxWaitTime + 35} mins</p>
+                                    <p className="text-[10px] text-blue-400">{cartMaxWaitTime} min prep + delivery time</p>
+                                </div>
                             </div>
                         )}
                         <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="text-2xl font-black dark:text-white">₦{cartTotal.toLocaleString()}</span></div>
@@ -1362,16 +1824,40 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
                             </div>
                         )}
 
-                        <button
-                            onClick={() => setShowModal(true)}
-                            disabled={cart.length === 0 || hasClosedVendor}
-                            className={`w-full font-bold py-4 rounded-xl shadow-lg transition-colors ${hasClosedVendor
-                                ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
-                                : 'bg-green-600 hover:bg-green-700 text-white'
-                                }`}
-                        >
-                            {hasClosedVendor ? '🔴 Cannot Checkout — Vendor Closed' : 'Checkout'}
-                        </button>
+                        {/* 🔒 GUEST CHECKOUT WALL */}
+                        {!user && cart.length > 0 ? (
+                            <div className="space-y-3">
+                                <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4 text-center">
+                                    <p className="text-orange-700 dark:text-orange-300 font-black text-sm mb-1">Sign in to complete your order</p>
+                                    <p className="text-orange-600 dark:text-orange-400 text-xs">Your cart is saved — create a free account or log in to checkout.</p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setCurrentView('login')}
+                                        className="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-bold py-3.5 rounded-xl transition-colors text-sm"
+                                    >
+                                        Create Account
+                                    </button>
+                                    <button
+                                        onClick={() => setCurrentView('login')}
+                                        className="flex-1 bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-white font-bold py-3.5 rounded-xl transition-colors text-sm"
+                                    >
+                                        Log In
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={() => setShowModal(true)}
+                                disabled={cart.length === 0 || hasClosedVendor}
+                                className={`w-full font-bold py-4 rounded-xl shadow-lg transition-colors ${hasClosedVendor
+                                    ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+                                    : 'bg-green-600 hover:bg-green-700 text-white'
+                                    }`}
+                            >
+                                {hasClosedVendor ? '🔴 Cannot Checkout — Vendor Closed' : 'Checkout'}
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>

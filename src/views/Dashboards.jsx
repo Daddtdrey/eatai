@@ -44,10 +44,10 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
     const [viewMode, setViewMode] = useState('active');
 
     useEffect(() => {
-        // Query fetches Confirmed (Ready), Picked Up (On way), and Delivered (History)
+        // Query fetches Ready (food done), Confirmed, Picked Up, and Delivered
         const q = query(
             collection(db, "orders"),
-            where("status", "in", ["confirmed", "picked_up", "delivered"])
+            where("status", "in", ["ready", "confirmed", "picked_up", "delivered"])
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -101,7 +101,7 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
 
                             {/* Header */}
                             <div className="flex justify-between items-center mb-2">
-                                <span className={`text-xs font-bold px-2 py-1 rounded-full ${task.status === 'picked_up' ? 'bg-purple-100 text-purple-700' : task.status === 'delivered' ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700'}`}>{task.status.toUpperCase()}</span>
+                                <span className={`text-xs font-bold px-2 py-1 rounded-full ${task.status === 'ready' ? 'bg-orange-100 text-orange-700 animate-pulse' : task.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : task.status === 'picked_up' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>{task.status === 'ready' ? '🍽️ FOOD READY — PICK UP NOW' : task.status.toUpperCase().replace('_', ' ')}</span>
                                 <span className="text-xs font-mono text-gray-400">#{task.id.slice(0, 6)}</span>
                             </div>
 
@@ -161,6 +161,9 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
                                 </a>
                             </div>
 
+                            {task.status === 'ready' && (
+                                <button onClick={() => handleStatus(task.id, 'picked_up')} className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold shadow hover:bg-orange-600 flex items-center justify-center gap-2 animate-pulse"><Truck className="w-5 h-5" /> 🍽️ Food Ready — Confirm Pickup</button>
+                            )}
                             {task.status === 'confirmed' && (
                                 <button onClick={() => handleStatus(task.id, 'picked_up')} className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold shadow hover:bg-purple-700 flex items-center justify-center gap-2"><Truck className="w-5 h-5" /> Confirm Pickup</button>
                             )}
@@ -862,24 +865,39 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                                 className="w-full p-2 text-sm rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                                             />
                                         </div>
+                                        <div className="flex-1">
+                                            <p className="text-[10px] text-gray-400 mb-0.5">Avg Wait (mins)</p>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                placeholder="e.g. 25"
+                                                value={locManualInput[v.id]?.avgWaitTime ?? (v.avgWaitTime || '')}
+                                                onChange={e => setLocManualInput(prev => ({ ...prev, [v.id]: { ...prev[v.id], avgWaitTime: e.target.value } }))}
+                                                className="w-full p-2 text-sm rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                            />
+                                        </div>
                                         <button
                                             className="mt-4 bg-green-500 text-white px-3 py-2 rounded-lg text-xs font-bold disabled:opacity-40"
-                                            disabled={!locManualInput[v.id]?.openTime && !locManualInput[v.id]?.closeTime}
+                                            disabled={!locManualInput[v.id]?.openTime && !locManualInput[v.id]?.closeTime && !locManualInput[v.id]?.avgWaitTime}
                                             onClick={async () => {
-                                                const { openTime, closeTime } = locManualInput[v.id] || {};
-                                                if (!openTime || !closeTime) return;
+                                                const { openTime, closeTime, avgWaitTime } = locManualInput[v.id] || {};
                                                 setLocSaving(prev => ({ ...prev, [v.id]: true }));
-                                                await saveVendorLocation(v.id, v.lat, v.lng, openTime, closeTime);
+                                                await saveVendorLocation(v.id, v.lat, v.lng, openTime, closeTime, avgWaitTime);
                                                 setLocSaving(prev => ({ ...prev, [v.id]: false }));
                                                 getVendorsWithLocation().then(setVendorsWithLocation);
                                             }}
                                         >
-                                            Save Hours
+                                            Save Settings
                                         </button>
                                     </div>
-                                    {v.openTime && v.closeTime && (
-                                        <p className="text-[11px] text-green-600 font-bold mt-1">✅ Set: {v.openTime} – {v.closeTime}</p>
-                                    )}
+                                    <div className="flex gap-2">
+                                        {v.openTime && v.closeTime && (
+                                            <p className="text-[11px] text-green-600 font-bold mt-1">✅ Hours: {v.openTime} – {v.closeTime}</p>
+                                        )}
+                                        {v.avgWaitTime && (
+                                            <p className="text-[11px] text-blue-600 font-bold mt-1">⏳ Wait Time: {v.avgWaitTime} mins</p>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -1026,7 +1044,7 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                             {adminOrders.filter(o => statusFilter === 'all' || o.status === statusFilter).length === 0 ? <p className="text-center text-gray-400 mt-10">No {statusFilter === 'all' ? '' : statusFilter} orders found.</p> :
                                 adminOrders.filter(o => statusFilter === 'all' || o.status === statusFilter).map(order => (
                                     <div key={order.id} onClick={() => setSelectedOrder(order)} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm cursor-pointer hover:shadow-md hover:border-orange-200 dark:hover:border-orange-800 transition-all active:scale-[0.98]">
-                                        <div className="flex justify-between items-start mb-2"><div><span className={`text-xs font-bold px-2 py-1 rounded-full ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-800'}`}>{order.status.replace('_', ' ')}</span><p className="text-xs text-gray-400 mt-1">{new Date(order.createdAt).toLocaleString()}</p></div><div className="text-right"><p className="font-black text-lg dark:text-white">₦{order.total.toLocaleString()}</p><p className="text-xs text-gray-500 uppercase">{order.paymentMethod}</p></div></div>
+                                        <div className="flex justify-between items-start mb-2"><div><span className={`text-xs font-bold px-2 py-1 rounded-full ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : order.status === 'confirmed' ? 'bg-blue-100 text-blue-700' : order.status === 'ready' ? 'bg-orange-100 text-orange-700' : order.status === 'picked_up' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-800'}`}>{order.status === 'ready' ? '🍽️ Ready' : order.status.replace('_', ' ')}</span><p className="text-xs text-gray-400 mt-1">{new Date(order.createdAt).toLocaleString()}</p></div><div className="text-right"><p className="font-black text-lg dark:text-white">₦{order.total.toLocaleString()}</p><p className="text-xs text-gray-500 uppercase">{order.paymentMethod}</p></div></div>
                                         <div className="text-xs text-gray-400 truncate">📍 {order.deliveryAddress} • {groupItems(order.items).length} item(s)</div>
                                     </div>))}
                         </div>
@@ -1171,6 +1189,9 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                             {selectedOrder.status === 'pending' && (
                                                 <button onClick={() => { handleStatusUpdate(selectedOrder.id, 'confirmed'); setSelectedOrder(null); }} className="w-full bg-green-600 text-white py-3 rounded-xl text-sm font-bold shadow-lg hover:bg-green-700 transition-colors">✅ Confirm Payment</button>
                                             )}
+                                            {selectedOrder.status === 'confirmed' && (
+                                                <button onClick={() => { handleStatusUpdate(selectedOrder.id, 'ready'); setSelectedOrder(null); }} className="w-full bg-orange-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg hover:bg-orange-600 transition-colors animate-pulse">🍽️ Order is Ready — Notify Rider</button>
+                                            )}
                                             {isSuperAdmin && (
                                                 <button onClick={async () => { if (confirm(`Delete order ${selectedOrder.id.slice(0, 5).toUpperCase()}? This cannot be undone.`)) { await deleteOrder(selectedOrder.id); setSelectedOrder(null); } }} className="w-full bg-red-100 text-red-600 py-2.5 rounded-xl text-xs font-bold hover:bg-red-200 transition-colors">🗑️ Delete Order</button>
                                             )}
@@ -1238,10 +1259,10 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-xl p-3"><Box className="w-5 h-5 text-gray-500" /><input required type="number" placeholder="Stock" className="bg-transparent border-none w-full outline-none dark:text-white" value={newItem.stock || ''} onChange={e => setNewItem({ ...newItem, stock: e.target.value })} /></div>
-                                    <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-xl p-3 relative">
-                                        <ImageIcon className="w-5 h-5 text-gray-500" />
-                                        <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => setProductFile(e.target.files[0])} />
-                                        <span className="text-xs text-gray-400 ml-1 truncate">{productFile ? "Image Selected" : "Tap to Upload"}</span>
+                                    {/* 🟢 FIX: Exposed file input properly and styled it */}
+                                    <div className="flex flex-col justify-center bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
+                                        <label className="text-[10px] text-gray-400 font-bold mb-1 uppercase flex items-center gap-1"><ImageIcon className="w-3 h-3"/> Product Image</label>
+                                        <input type="file" accept="image/*" className="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-orange-50 file:text-orange-600 hover:file:bg-orange-100 cursor-pointer" onChange={e => setProductFile(e.target.files[0])} />
                                     </div>
                                 </div>
 
@@ -1249,6 +1270,15 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                 <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700 p-3 rounded-xl">
                                     <input type="checkbox" id="hasAddons" className="w-5 h-5 text-orange-500 rounded focus:ring-orange-500" checked={newItem.hasAddons !== false} onChange={e => setNewItem({ ...newItem, hasAddons: e.target.checked })} />
                                     <label htmlFor="hasAddons" className="text-sm font-bold text-gray-700 dark:text-gray-200 cursor-pointer">Allow Add-ons</label>
+                                </div>
+
+                                {/* 🟢 FEATURED ON HOMEPAGE TOGGLE */}
+                                <div className="flex items-center gap-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-800 p-3 rounded-xl">
+                                    <input type="checkbox" id="featured" className="w-5 h-5 text-orange-500 rounded focus:ring-orange-500" checked={!!newItem.featured} onChange={e => setNewItem({ ...newItem, featured: e.target.checked })} />
+                                    <div>
+                                        <label htmlFor="featured" className="text-sm font-bold text-orange-800 dark:text-orange-200 cursor-pointer">⭐ Feature on Homepage</label>
+                                        <p className="text-[10px] text-orange-500">Shows this item in the Featured Picks section on the home screen</p>
+                                    </div>
                                 </div>
 
                                 {/* 🟢 PER-PRODUCT ADDON EDITOR */}

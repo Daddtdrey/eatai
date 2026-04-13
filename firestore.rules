@@ -99,5 +99,19 @@ service cloud.firestore {
       allow create: if isSignedIn();
       allow read, update: if isSuper() || isVendor();
     }
+
+    // 12. REFERRAL CODES
+    match /referralCodes/{code} {
+      allow read: if true; // anyone can validate a code
+      allow write: if isSignedIn(); // users generate codes and increment uses
+    }
+
+    // 13. CREDITS
+    match /credits/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+      match /entries/{entryId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
   }
 }

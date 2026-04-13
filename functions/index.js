@@ -314,14 +314,158 @@ exports.calculateCheckoutTotals = onCall(async (request) => {
         }
     }
 
-    const grandTotal = subTotal + deliveryFee - discount;
+    // 4. Process Credits
+    const { creditsApplied } = request.data;
+    let finalDiscount = discount;
+    let actualCreditsApplied = 0;
+
+    if (creditsApplied > 0) {
+        // Enforce minimum order total required to use credits (e.g., 2500)
+        if (subTotal + deliveryFee >= 2500) {
+            // Securely lookup the user's active credit balance
+            const now = new Date().toISOString();
+            const creditsSnap = await db.collection("credits").doc(uid).collection("entries")
+                .where("usedAt", "==", null)
+                .where("expiresAt", ">", now)
+                .get();
+
+            let trueBalance = 0;
+            creditsSnap.forEach(d => trueBalance += (d.data().amount || 0));
+
+            // Can only apply up to what they actually have, and up to the total price
+            actualCreditsApplied = Math.min(creditsApplied, trueBalance, subTotal + deliveryFee - discount);
+            finalDiscount += actualCreditsApplied;
+        }
+    }
+
+    const grandTotal = subTotal + deliveryFee - finalDiscount;
 
     return {
         subTotal,
         deliveryFee,
-        discount,
+        discount: finalDiscount, // We bundle promo code discount + credits used
+        creditsUsed: actualCreditsApplied,
         grandTotal,
         appliedPromo,
         verifiedCart
     };
+});
+
+/**
+ * 🎁 REFERRAL REWARD TRIGGER
+ * Fires when an order transitions to 'confirmed'.
+ * Awards ₦500 credit to both referrer and referee on the referee's
+ * first qualifying order (food subTotal ≥ ₦3,000).
+ * Anti-gaming: uses a Firestore transaction, checks firstOrderCompleted flag,
+ * and enforces 15 referrals/month cap on the referrer.
+ */
+exports.rewardReferral = onDocumentUpdated("orders/{orderId}", async (event) => {
+    const newData = event.data.after.data();
+    const prevData = event.data.before.data();
+
+    // Only fire when status changes to 'confirmed'
+    if (!(newData.status === "confirmed" && prevData.status !== "confirmed")) return;
+
+    const db = admin.firestore();
+    const userId = newData.userId;
+    if (!userId) return;
+
+    const CREDIT_AMOUNT = 500;
+    const MIN_SUBTOTAL = 3000;
+    const MAX_REFERRALS_PER_MONTH = 15;
+    const CREDIT_EXPIRY_DAYS = 35;
+
+    try {
+        // Check if this user's first order is already completed
+        const userRef = db.collection("users").doc(userId);
+        const userSnap = await userRef.get();
+        if (!userSnap.exists) return;
+
+        const userData = userSnap.data();
+
+        // Only reward on the very first confirmed order
+        if (userData.firstOrderCompleted === true) {
+            console.log(`⏭️ Referral skipped — ${userId} has already completed their first order.`);
+            return;
+        }
+
+        // Check food subtotal meets minimum
+        const subTotal = newData.subTotal || 0;
+        if (subTotal < MIN_SUBTOTAL) {
+            console.log(`⏭️ Referral skipped — subTotal ₦${subTotal} is below ₦${MIN_SUBTOTAL} minimum.`);
+            // Still mark first order done so this doesn't fire again
+            await userRef.update({ firstOrderCompleted: true });
+            return;
+        }
+
+        // Check if this user was referred by someone
+        const referredByUid = userData.referredBy;
+        if (!referredByUid) {
+            console.log(`⏭️ No referrer found for user ${userId}. Marking first order done.`);
+            await userRef.update({ firstOrderCompleted: true });
+            return;
+        }
+
+        const referrerRef = db.collection("users").doc(referredByUid);
+
+        await db.runTransaction(async (tx) => {
+            const referrerSnap = await tx.get(referrerRef);
+            if (!referrerSnap.exists) throw new Error("Referrer not found");
+
+            const referrerData = referrerSnap.data();
+            const thisMonth = new Date().toISOString().slice(0, 7); // "2026-04"
+
+            // Reset count if new month
+            const currentMonthKey = referrerData.referralMonthKey || "";
+            const currentCount = currentMonthKey === thisMonth ? (referrerData.referralCount || 0) : 0;
+
+            if (currentCount >= MAX_REFERRALS_PER_MONTH) {
+                console.log(`⛔ Referrer ${referredByUid} has hit their 15/month referral cap.`);
+                // Mark first order done for the referee but don't award
+                tx.update(userRef, { firstOrderCompleted: true });
+                return;
+            }
+
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + CREDIT_EXPIRY_DAYS);
+            const expiresAtISO = expiresAt.toISOString();
+            const now = new Date().toISOString();
+
+            // Award credit to REFERRER (inviter)
+            const referrerCreditRef = db.collection("credits").doc(referredByUid).collection("entries").doc();
+            tx.set(referrerCreditRef, {
+                amount: CREDIT_AMOUNT,
+                reason: `Referral: ${userData.referredByCode || ""}`,
+                expiresAt: expiresAtISO,
+                usedAt: null,
+                createdAt: now,
+                orderId: event.params.orderId,
+            });
+
+            // Award credit to REFEREE (invited)
+            const refereeCreditRef = db.collection("credits").doc(userId).collection("entries").doc();
+            tx.set(refereeCreditRef, {
+                amount: CREDIT_AMOUNT,
+                reason: "Welcome bonus: Referred by a friend",
+                expiresAt: expiresAtISO,
+                usedAt: null,
+                createdAt: now,
+                orderId: event.params.orderId,
+            });
+
+            // Update referrer stats
+            tx.update(referrerRef, {
+                referralCount: currentCount + 1,
+                referralMonthKey: thisMonth,
+                totalReferralEarned: admin.firestore.FieldValue.increment(CREDIT_AMOUNT),
+            });
+
+            // Mark referee's first order as done
+            tx.update(userRef, { firstOrderCompleted: true });
+        });
+
+        console.log(`✅ Referral rewards issued: ₦${CREDIT_AMOUNT} each to ${referredByUid} and ${userId}`);
+    } catch (err) {
+        console.error("❌ rewardReferral error:", err);
+    }
 });

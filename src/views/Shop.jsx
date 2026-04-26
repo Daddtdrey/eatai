@@ -24,7 +24,7 @@ import { ethers } from 'ethers';
 // 🟢 IMPORTS
 import { ViewContainer, DietaryFilter, ProductCard, OrderDetailModal, Toast } from '../components/UI.jsx';
 import { ProductDetailModal } from '../components/ProductDetailModal.jsx';
-import { doc, collection, onSnapshot, query, where } from 'firebase/firestore';
+import { doc, getDoc, collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
     signInWithGoogle, createOrder, getUserOrders, saveUserProfile, getUserProfile,
     db, saveWalletToProfile, requestNotificationPermission,
@@ -477,23 +477,31 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity, vendorsByLo
         setCurrentView('market');
     };
 
-    // Dynamic Top Vendors from Firebase
+    // Dynamic Top Vendors from Firebase — includes city for direct market routing
     const uniqueVendors = [...new Set(Object.values(vendorsByLocation || {}).flat())];
 
-    // Sort randomly or alphabetically, for now just show them all mapped to their logos
     const allTopVendors = uniqueVendors.map(vName => {
         const meta = vendorMetadata?.[vName] || {};
-        const logo = meta.logo || 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=400&q=80'; // Fallback if no logo uploaded yet
-        return {
-            name: vName,
-            img: logo,
-            tags: 'Local • Fast Food',
-        };
+        const logo = meta.logo || 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=400&q=80';
+        // Find which city this vendor belongs to
+        const vendorCity = Object.keys(vendorsByLocation || {}).find(loc =>
+            (vendorsByLocation[loc] || []).includes(vName)
+        ) || null;
+        const open = isVendorOpen(vName, vendorMetadata);
+        return { name: vName, img: logo, city: vendorCity, meta, open };
     });
 
-    const filteredVendors = allTopVendors.filter(v =>
-        v.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const q = searchQuery.toLowerCase();
+    const filteredVendors = allTopVendors.filter(v => v.name.toLowerCase().includes(q));
+
+    // Full-site item search — food items across all vendors
+    const filteredItems = q
+        ? marketData.filter(item =>
+            item.name?.toLowerCase().includes(q) ||
+            item.vendor?.toLowerCase().includes(q) ||
+            item.desc?.toLowerCase().includes(q)
+          )
+        : [];
 
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
@@ -502,28 +510,28 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity, vendorsByLo
         <div className="flex flex-col h-full animate-fade-in pb-32 bg-gray-50 dark:bg-gray-950 overflow-y-auto">
 
             {/* HEADER */}
-            <div className="px-6 pt-6 pb-4 bg-white dark:bg-gray-900 sticky top-0 z-10 border-b border-gray-100 dark:border-gray-800 rounded-b-3xl shadow-sm">
-                <div className="flex justify-between items-center mb-4">
+            <div className="px-5 pt-5 pb-4 bg-white dark:bg-gray-900 sticky top-0 z-10 border-b border-gray-100 dark:border-gray-800 shadow-sm">
+                <div className="flex justify-between items-center mb-3">
                     <div>
-                        <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">{greeting},</p>
-                        <h1 className="text-2xl font-black text-gray-900 dark:text-white flex items-center gap-2 font-[Fredoka]">
+                        <p className="text-gray-400 text-[11px] font-semibold uppercase tracking-widest">{greeting}</p>
+                        <h1 className="text-xl font-black text-gray-900 dark:text-white leading-tight font-[Fredoka]">
                             {user ? user.displayName?.split(' ')[0] : 'Guest'} 👋
                         </h1>
                     </div>
                     {user ? (
-                        <div onClick={() => setShowProfile(true)} className="w-10 h-10 cursor-pointer active:scale-95 transition-transform bg-orange-100 dark:bg-gray-800 rounded-full flex items-center justify-center border-2 border-white dark:border-gray-700 shadow-sm overflow-hidden">
-                            <img src={`https://ui-avatars.com/api/?name=${user?.displayName}&background=ffedd5&color=f97316`} alt="User" />
+                        <div onClick={() => setShowProfile(true)} className="w-10 h-10 cursor-pointer active:scale-95 transition-transform rounded-full overflow-hidden ring-2 ring-orange-400 ring-offset-2 shadow-md">
+                            <img src={`https://ui-avatars.com/api/?name=${user?.displayName}&background=f97316&color=fff&bold=true`} alt="User" className="w-full h-full object-cover" />
                         </div>
                     ) : (
-                        <button onClick={() => setCurrentView('login')} className="w-10 h-10 bg-orange-100 dark:bg-gray-800 rounded-full flex items-center justify-center border-2 border-white dark:border-gray-700 shadow-sm text-orange-500 active:scale-95 transition-transform">
-                            <User className="w-5 h-5" />
+                        <button onClick={() => setCurrentView('login')} className="flex items-center gap-1.5 bg-orange-500 text-white text-xs font-bold px-3 py-2 rounded-full shadow-sm active:scale-95 transition-transform">
+                            <User className="w-3.5 h-3.5" /> Sign In
                         </button>
                     )}
                 </div>
 
                 {/* SEARCH BAR */}
-                <div className="w-full bg-gray-100 dark:bg-gray-800 p-3.5 rounded-2xl flex items-center gap-3 text-gray-400 focus-within:ring-2 focus-within:ring-orange-500 transition-all">
-                    <Search className="w-5 h-5 text-gray-400" />
+                <div className="w-full bg-gray-100 dark:bg-gray-800 px-4 py-3 rounded-2xl flex items-center gap-3 focus-within:ring-2 focus-within:ring-orange-400 transition-all shadow-sm">
+                    <Search className="w-4 h-4 text-gray-400 shrink-0" />
                     <input
                         type="text"
                         placeholder="Search vendors or food..."
@@ -531,32 +539,33 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity, vendorsByLo
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                     />
+                    {searchQuery && (
+                        <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-600">
+                            <X className="w-4 h-4" />
+                        </button>
+                    )}
                 </div>
             </div>
 
-            {/* 🟢 WHAT ARE YOU CRAVING? — sticky food tiles above content */}
-            <div className="px-5 pt-3 pb-3 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 sticky top-[72px] z-10">
-                <div className="flex justify-between items-center mb-2">
-                    <h3 className="text-gray-900 dark:text-white font-bold text-sm font-[Fredoka]">What are you craving?</h3>
-                    <span onClick={() => setCurrentView('market')} className="text-orange-500 text-[10px] font-bold cursor-pointer hover:underline">See all</span>
-                </div>
-                <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1 -mx-1 px-1">
+            {/* CATEGORIES ROW — sticky below header */}
+            <div className="px-5 pt-3 pb-2 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 sticky top-[116px] z-10">
+                <div className="flex gap-3 overflow-x-auto scrollbar-hide -mx-1 px-1">
                     {FOOD_CATEGORIES.map((cat, i) => (
                         <button
                             key={i}
                             onClick={() => handleFoodCategoryTap(cat)}
-                            className="shrink-0 flex flex-col items-center gap-1 active:scale-95 transition-transform group"
+                            className="shrink-0 flex flex-col items-center gap-1.5 active:scale-95 transition-transform group"
                         >
-                            <div className="w-14 h-14 rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 border-2 border-transparent group-hover:border-orange-400 transition-all shadow-sm relative">
+                            <div className="w-14 h-14 rounded-2xl overflow-hidden bg-orange-50 dark:bg-gray-800 shadow-sm relative border-2 border-transparent group-hover:border-orange-400 transition-all">
                                 <img
                                     src={cat.img}
                                     alt={cat.label}
                                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                                     onError={e => { e.target.style.display = 'none'; e.target.parentElement.innerHTML = `<div class='w-full h-full flex items-center justify-center text-2xl'>${cat.emoji}</div>`; }}
                                 />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent rounded-2xl" />
                             </div>
-                            <span className="text-[10px] font-bold text-gray-600 dark:text-gray-300">{cat.label}</span>
+                            <span className="text-[10px] font-bold text-gray-600 dark:text-gray-400">{cat.label}</span>
                         </button>
                     ))}
                 </div>
@@ -568,7 +577,25 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity, vendorsByLo
                 {banners.length > 0 && (
                     <div className="-mx-6 px-6 pb-2 pt-2 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide gap-4">
                         {banners.map(b => (
-                            <div key={b.id} onClick={() => b.linkToVendor ? setCurrentView('market') : null} className="snap-center shrink-0 w-[85%] sm:w-[60%] md:w-[45%] h-36 md:h-48 relative rounded-[1.5rem] overflow-hidden shadow-lg border-2 border-transparent hover:border-orange-500 transition-colors cursor-pointer group">
+                            <div
+                                key={b.id}
+                                onClick={() => {
+                                    if (!b.linkToVendor) return;
+                                    const vendorName = b.linkToVendor.trim();
+                                    // Find the city that contains this vendor
+                                    const foundCity = Object.keys(vendorsByLocation || {}).find(loc =>
+                                        (vendorsByLocation[loc] || []).some(v => v.toLowerCase() === vendorName.toLowerCase())
+                                    );
+                                    // Find exact-case vendor name from the list
+                                    const exactVendor = foundCity
+                                        ? (vendorsByLocation[foundCity] || []).find(v => v.toLowerCase() === vendorName.toLowerCase()) || vendorName
+                                        : vendorName;
+                                    if (foundCity) setCity(foundCity);
+                                    setVendor(exactVendor);
+                                    setCurrentView('market');
+                                }}
+                                className="snap-center shrink-0 w-[85%] sm:w-[60%] md:w-[45%] h-36 md:h-48 relative rounded-[1.5rem] overflow-hidden shadow-lg border-2 border-transparent hover:border-orange-500 transition-colors cursor-pointer group"
+                            >
                                 <img src={b.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-5">
                                     <h3 className="text-white font-black text-lg md:text-xl leading-tight font-[Fredoka] drop-shadow-md">{b.title}</h3>
@@ -580,151 +607,205 @@ export const HomeView = ({ setCurrentView, user, setVendor, setCity, vendorsByLo
                 )}
 
                 {/* HERO BANNER */}
-                <div className="relative w-full h-60 bg-gradient-to-r from-orange-500 to-red-600 rounded-[2.5rem] overflow-hidden shadow-xl shadow-orange-500/30 flex items-center group cursor-pointer transition-transform active:scale-[0.99]" onClick={() => setCurrentView('location')}>
-                    <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+                <div className="relative w-full h-52 bg-gradient-to-br from-orange-500 via-orange-600 to-red-600 rounded-3xl overflow-hidden shadow-lg shadow-orange-400/30 flex items-center group cursor-pointer transition-transform active:scale-[0.99]" onClick={() => setCurrentView('location')}>
+                    <div className="absolute inset-0 opacity-[0.07] bg-[radial-gradient(circle_at_20%_80%,#fff_1px,transparent_1px),radial-gradient(circle_at_80%_20%,#fff_1px,transparent_1px)] bg-[size:24px_24px]"></div>
 
-                    <div className="relative z-10 pl-8 w-1/2 flex flex-col justify-center h-full">
-                        <span className="bg-white/20 backdrop-blur-md text-white text-[10px] font-black px-3 py-1 rounded-full mb-3 inline-block w-fit tracking-wide border border-white/10">FAST DELIVERY ⚡</span>
-                        <h2 className="text-4xl font-black text-white leading-none mb-3 font-[Fredoka] drop-shadow-md">What are<br />you craving?<br /><span className="text-orange-100 text-2xl">Eat Now.</span></h2>
-                        <span className="text-white/90 text-xs font-bold flex items-center gap-2 group-hover:text-orange-100 transition-colors">Order Food <div className="bg-white text-orange-600 rounded-full p-1 shadow-sm"><ArrowLeft className="w-3 h-3 rotate-180" /></div></span>
+                    <div className="relative z-10 pl-7 w-[55%] flex flex-col justify-center h-full">
+                        <span className="bg-white/20 text-white text-[9px] font-black px-2.5 py-1 rounded-full mb-2.5 inline-flex items-center gap-1 w-fit border border-white/20 backdrop-blur-sm">⚡ FAST DELIVERY</span>
+                        <h2 className="text-3xl font-black text-white leading-tight mb-3 font-[Fredoka] drop-shadow">Hungry?<br /><span className="text-orange-100">Order Now.</span></h2>
+                        <span className="inline-flex items-center gap-2 bg-white text-orange-600 text-xs font-black px-3.5 py-2 rounded-full shadow-md w-fit group-hover:bg-orange-50 transition-colors active:scale-95">
+                            Browse Vendors <ArrowLeft className="w-3.5 h-3.5 rotate-180" />
+                        </span>
                     </div>
 
-                    {/* BIG FOOD IMAGES */}
-                    <div className="absolute -right-8 -bottom-6 w-56 h-56 bg-orange-200/20 backdrop-blur-sm rounded-full blur-xl z-0"></div>
-                    <img src="https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&q=80" className="absolute -right-10 -bottom-8 w-64 h-64 object-cover rounded-full shadow-2xl drop-shadow-2xl transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 z-20 border-4 border-white/20" alt="Burger" />
-                    <img src="https://images.unsplash.com/photo-1513104890138-7c749659a591?w=200&q=80" className="absolute right-36 top-6 w-24 h-24 object-cover rounded-full shadow-lg opacity-90 rotate-12 z-10 border-2 border-white/30 group-hover:-rotate-12 transition-all duration-500" alt="Pizza" />
+                    <div className="absolute -right-4 -bottom-4 w-48 h-48 bg-white/10 rounded-full blur-2xl" />
+                    <img src="https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&q=80" className="absolute right-0 bottom-0 w-52 h-52 object-cover rounded-full shadow-2xl transform group-hover:scale-105 group-hover:rotate-3 transition-all duration-500 z-20 border-4 border-white/20 -mr-6 -mb-4" alt="Burger" />
+                    <img src="https://images.unsplash.com/photo-1513104890138-7c749659a591?w=200&q=80" className="absolute right-28 top-4 w-20 h-20 object-cover rounded-full shadow-lg opacity-80 rotate-12 z-10 border-2 border-white/30 group-hover:-rotate-12 transition-all duration-500" alt="Pizza" />
                 </div>
 
-                {/* TOP VENDORS */}
+                {/* FEATURED PICKS — right below the hero */}
+                {(() => {
+                    const featured = marketData.filter(item => item.featured);
+                    if (featured.length === 0) return null;
+                    return (
+                        <div>
+                            <div className="flex justify-between items-center mb-3">
+                                <h3 className="text-gray-900 dark:text-white font-bold text-lg font-[Fredoka]">⭐ Featured Picks</h3>
+                                <span onClick={() => setCurrentView('location')} className="text-orange-500 text-xs font-bold cursor-pointer">See all</span>
+                            </div>
+                            <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 -mx-1 px-1">
+                                {featured.map((item, idx) => (
+                                    <div key={item.id || idx} className="shrink-0 w-44 bg-white dark:bg-gray-900 rounded-3xl overflow-hidden shadow-md active:scale-95 transition-transform relative">
+                                        <div className="w-full h-28 bg-gray-100 dark:bg-gray-800 overflow-hidden relative">
+                                            {item.imageUrl ? (
+                                                <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center text-4xl">{item.image || '🍽️'}</div>
+                                            )}
+                                            <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+                                            <span className="absolute top-2 left-2 bg-orange-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-sm">⭐ FEATURED</span>
+                                        </div>
+                                        <div className="p-3">
+                                            <p className="text-sm font-black text-gray-900 dark:text-white leading-tight line-clamp-1 font-[Fredoka]">{item.name}</p>
+                                            <p className="text-[10px] text-gray-400 mt-0.5 mb-2">{item.vendor}</p>
+                                            <div className="flex items-center justify-between">
+                                                <p className="text-sm font-black text-orange-500">₦{(item.price || 0).toLocaleString()}</p>
+                                                <button
+                                                    onClick={() => addToCart && addToCart({ ...item, quantity: 1 })}
+                                                    className="bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold h-7 w-7 rounded-full transition-colors flex items-center justify-center active:scale-90 shadow-sm shadow-orange-300"
+                                                >
+                                                    <Plus className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                })()}
+
+                {/* ALL VENDORS */}
                 <div>
                     <div className="flex justify-between items-center mb-3">
-                        <h3 className="text-gray-900 dark:text-white font-bold text-lg font-[Fredoka]">Top Vendors</h3>
-                        {!searchQuery && <span onClick={() => setCurrentView('vendors')} className="text-orange-500 text-xs font-bold cursor-pointer hover:underline">See all</span>}
+                        <h3 className="text-gray-900 dark:text-white font-bold text-lg font-[Fredoka]">All Vendors</h3>
+                        {!searchQuery && <span onClick={() => setCurrentView('location')} className="text-orange-500 text-xs font-bold cursor-pointer hover:underline">Browse by city</span>}
                     </div>
 
-                    <div className={`flex ${searchQuery ? 'flex-col gap-3' : 'gap-4 overflow-x-auto scrollbar-hide pb-4 -mx-5 px-5'}`}>
-                        {filteredVendors.map((vendor, i) => (
-                            <div key={i} onClick={() => setCurrentView('vendors')} className={`bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl overflow-hidden shadow-sm active:scale-95 transition-transform cursor-pointer group ${searchQuery ? 'flex flex-row items-center p-2 gap-3' : 'min-w-[200px] flex-col'}`}>
-                                <div className={`${searchQuery ? 'w-16 h-16 rounded-xl' : 'h-28 w-full'} bg-gray-200 dark:bg-gray-800 relative overflow-hidden`}>
-                                    <img src={vendor.img} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={vendor.name} onError={(e) => { e.target.style.display = 'none'; e.target.parentElement.style.backgroundColor = '#eee' }} />
+                    {filteredVendors.length === 0 && (
+                        <p className="text-center text-gray-400 text-sm py-6">No vendors found</p>
+                    )}
+
+                    {/* List view when searching, grid when browsing */}
+                    {searchQuery ? (
+                        <div className="flex flex-col gap-3">
+                            {/* VENDOR MATCHES */}
+                            {filteredVendors.length > 0 && (
+                                <>
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">Vendors</p>
+                                    {filteredVendors.map((v, i) => (
+                                        <div
+                                            key={i}
+                                            onClick={() => { if (v.city) setCity(v.city); setVendor(v.name); setCurrentView('market'); }}
+                                            className="flex items-center gap-3 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-3 shadow-sm active:scale-[0.98] transition-transform cursor-pointer group"
+                                        >
+                                            <div className="w-14 h-14 rounded-xl bg-gray-200 dark:bg-gray-800 overflow-hidden shrink-0">
+                                                <img src={v.img} alt={v.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" onError={e => { e.target.style.display = 'none'; }} />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <h4 className="font-black text-gray-900 dark:text-white text-sm font-[Fredoka] leading-tight">{v.name}</h4>
+                                                {v.meta?.category && <p className="text-[10px] text-orange-500 font-bold capitalize">{v.meta.category}</p>}
+                                                <div className="flex items-center gap-2 mt-0.5">
+                                                    {v.meta?.avgWaitTime && <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-0.5"><Clock className="w-3 h-3" /> {v.meta.avgWaitTime} min</span>}
+                                                    {v.city && <span className="text-[10px] text-gray-500 flex items-center gap-0.5"><MapPin className="w-3 h-3 text-orange-400" /> {v.city}</span>}
+                                                </div>
+                                            </div>
+                                            <div className={`text-[9px] font-black px-2 py-0.5 rounded-full ${v.open ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                                                {v.open ? 'OPEN' : 'CLOSED'}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </>
+                            )}
+
+                            {/* FOOD ITEM MATCHES */}
+                            {filteredItems.length > 0 && (
+                                <>
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1 mt-2">Food Items</p>
+                                    {filteredItems.map((item, idx) => {
+                                        const itemCity = Object.keys(vendorsByLocation || {}).find(loc => (vendorsByLocation[loc] || []).includes(item.vendor)) || null;
+                                        return (
+                                            <div
+                                                key={item.id || idx}
+                                                onClick={() => { if (itemCity) setCity(itemCity); if (item.vendor) setVendor(item.vendor); setCurrentView('market'); }}
+                                                className="flex items-center gap-3 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-3 shadow-sm active:scale-[0.98] transition-transform cursor-pointer group"
+                                            >
+                                                <div className="w-14 h-14 rounded-xl bg-gray-100 dark:bg-gray-800 overflow-hidden shrink-0">
+                                                    {item.imageUrl
+                                                        ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                                                        : <div className="w-full h-full flex items-center justify-center text-2xl">{item.image || '🍽️'}</div>
+                                                    }
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <h4 className="font-bold text-gray-900 dark:text-white text-sm leading-tight line-clamp-1">{item.name}</h4>
+                                                    <p className="text-[10px] text-gray-400 mt-0.5">{item.vendor}</p>
+                                                    <p className="text-xs font-black text-orange-500 mt-0.5">₦{(item.price || 0).toLocaleString()}</p>
+                                                </div>
+                                                <ArrowLeft className="w-4 h-4 text-gray-300 rotate-180 shrink-0" />
+                                            </div>
+                                        );
+                                    })}
+                                </>
+                            )}
+
+                            {filteredVendors.length === 0 && filteredItems.length === 0 && (
+                                <p className="text-center text-gray-400 text-sm py-8">No results for "{searchQuery}"</p>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-2 gap-4">
+                            {filteredVendors.map((v, i) => (
+                                <div
+                                    key={i}
+                                    onClick={() => { if (v.city) setCity(v.city); setVendor(v.name); setCurrentView('market'); }}
+                                    className="bg-white dark:bg-gray-900 rounded-3xl overflow-hidden shadow-md border border-gray-100/80 dark:border-gray-800 active:scale-95 transition-all duration-150 cursor-pointer group"
+                                >
+                                    {/* Cover image */}
+                                    <div className="relative h-32 bg-gray-200 dark:bg-gray-800 overflow-hidden">
+                                        <img
+                                            src={v.img}
+                                            alt={v.name}
+                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                            onError={e => { e.target.style.display = 'none'; }}
+                                        />
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+                                        {/* Open/Closed badge */}
+                                        <span className={`absolute top-2 left-2 text-[9px] font-black px-2 py-0.5 rounded-full backdrop-blur-sm ${v.open ? 'bg-green-500/90 text-white' : 'bg-red-500/90 text-white'}`}>
+                                            {v.open ? 'OPEN' : 'CLOSED'}
+                                        </span>
+                                        {/* Menu badge */}
+                                        <span className="absolute top-2 right-2 bg-orange-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-sm">MENU</span>
+                                        {/* City pill at bottom of image */}
+                                        {v.city && (
+                                            <span className="absolute bottom-2 left-2 bg-black/50 backdrop-blur-sm text-white text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                                                <MapPin className="w-2.5 h-2.5 text-orange-300" /> {v.city}
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    {/* Info section */}
+                                    <div className="p-3">
+                                        <h4 className="font-black text-gray-900 dark:text-white text-sm font-[Fredoka] leading-tight line-clamp-1">{v.name}</h4>
+                                        {v.meta?.category && <p className="text-[10px] text-orange-500 font-bold mt-0.5 capitalize">{v.meta.category}</p>}
+                                        <div className="flex items-center gap-1 mt-1.5">
+                                            <Clock className="w-3 h-3 text-orange-400" />
+                                            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">{v.meta?.avgWaitTime ? `${v.meta.avgWaitTime} min` : '15–30 min'}</span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="p-3">
-                                    <h4 className="font-black text-gray-800 dark:text-white text-sm font-[Fredoka]">{vendor.name}</h4>
-                                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">{vendor.tags}</p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 {/* NOTIFICATION PROMPT — only shown to logged-in users who haven't granted */}
                 {user && !hasPermission && (
                     <button
                         onClick={handleNotificationClick}
-                        className="w-full flex items-center gap-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl px-4 py-3 active:scale-95 transition-all"
+                        className="w-full flex items-center gap-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-100 dark:border-blue-800/50 rounded-3xl px-4 py-3.5 active:scale-[0.98] transition-all shadow-sm"
                     >
-                        <div className="bg-blue-100 dark:bg-blue-800 p-2 rounded-full text-blue-600 dark:text-blue-300 animate-pulse shrink-0"><Bell className="w-4 h-4" /></div>
-                        <div className="text-left">
-                            <p className="text-sm font-bold text-blue-800 dark:text-blue-200">Enable order alerts</p>
-                            <p className="text-xs text-blue-500 dark:text-blue-400">Get notified when your food is ready</p>
+                        <div className="bg-blue-500 p-2.5 rounded-2xl text-white shrink-0 shadow-sm shadow-blue-300">
+                            <Bell className="w-4 h-4" />
                         </div>
-                        <span className="ml-auto text-xs font-bold text-blue-500 dark:text-blue-400 shrink-0">Enable →</span>
+                        <div className="text-left flex-1">
+                            <p className="text-sm font-bold text-gray-900 dark:text-blue-200">Enable order alerts</p>
+                            <p className="text-xs text-gray-500 dark:text-blue-400 mt-0.5">Know the moment your food is ready</p>
+                        </div>
+                        <span className="text-xs font-black text-blue-600 dark:text-blue-400 shrink-0 bg-blue-100 dark:bg-blue-800 px-2.5 py-1 rounded-full">Enable</span>
                     </button>
                 )}
 
-                {/* FEATURED PICKS */}
-                {(() => {
-                    const featured = marketData.filter(item => item.featured);
-                    if (featured.length === 0) return null;
-                    return (
-                        <div>
-                            <div className="flex justify-between items-center mb-2">
-                                <h3 className="text-gray-900 dark:text-white font-bold text-lg font-[Fredoka] flex items-center gap-1">⭐ Featured Picks</h3>
-                                <span onClick={() => setCurrentView('market')} className="text-orange-500 text-[10px] font-bold cursor-pointer hover:underline">See all</span>
-                            </div>
-                            <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 -mx-1 px-1">
-                                {featured.map((item, idx) => (
-                                    <div key={item.id || idx} className="shrink-0 w-40 bg-white dark:bg-gray-900 border-2 border-orange-200 dark:border-orange-800 rounded-2xl overflow-hidden shadow-md shadow-orange-500/10 active:scale-95 transition-transform relative">
-                                        <span className="absolute top-2 left-2 bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full z-10">⭐ Featured</span>
-                                        <div className="w-full h-24 bg-gray-100 dark:bg-gray-800 overflow-hidden">
-                                            {item.imageUrl ? (
-                                                <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center text-3xl">{item.image || '🍽️'}</div>
-                                            )}
-                                        </div>
-                                        <div className="p-2.5">
-                                            <p className="text-xs font-bold text-gray-800 dark:text-white leading-tight line-clamp-1 mb-0.5">{item.name}</p>
-                                            <p className="text-[10px] text-gray-400 mb-1">{item.vendor}</p>
-                                            <p className="text-xs font-black text-orange-500 mb-2">₦{(item.price || 0).toLocaleString()}</p>
-                                            <button
-                                                onClick={() => addToCart && addToCart({ ...item, quantity: 1 })}
-                                                className="w-full bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1 active:scale-95"
-                                            >
-                                                <Plus className="w-3 h-3" /> Add to Cart
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    );
-                })()}
 
-                {/* VENDOR MENU FEED */}
-                {(() => {
-                    if (loadingData) return (
-                        <div>
-                            <h3 className="text-gray-900 dark:text-white font-bold text-lg mb-3 font-[Fredoka]">From Our Vendors</h3>
-                            <div className="flex gap-3 overflow-x-auto pb-2">
-                                {[1,2,3].map(i => <div key={i} className="shrink-0 w-36 h-44 rounded-2xl bg-gray-200 dark:bg-gray-800 animate-pulse" />)}
-                            </div>
-                        </div>
-                    );
-                    // Group items by vendor
-                    const grouped = {};
-                    marketData.forEach(item => {
-                        const v = item.vendor || 'Other';
-                        if (!grouped[v]) grouped[v] = [];
-                        grouped[v].push(item);
-                    });
-                    const vendorNames = Object.keys(grouped);
-                    if (vendorNames.length === 0) return null;
-                    return vendorNames.map(vendorName => (
-                        <div key={vendorName}>
-                            <div className="flex justify-between items-center mb-2">
-                                <h3 className="text-gray-900 dark:text-white font-bold text-base font-[Fredoka]">{vendorName}</h3>
-                                <span
-                                    onClick={() => { setCity && setCity(Object.keys(vendorsByLocation || {}).find(loc => (vendorsByLocation[loc] || []).includes(vendorName)) || null); setVendor && setVendor(vendorName); setCurrentView('market'); }}
-                                    className="text-orange-500 text-[10px] font-bold cursor-pointer hover:underline"
-                                >See all</span>
-                            </div>
-                            <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 -mx-1 px-1">
-                                {grouped[vendorName].map((item, idx) => (
-                                    <div key={item.id || idx} className="shrink-0 w-36 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl overflow-hidden shadow-sm active:scale-95 transition-transform">
-                                        <div className="w-full h-24 bg-gray-100 dark:bg-gray-800 relative overflow-hidden">
-                                            {item.imageUrl ? (
-                                                <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center text-3xl">{item.image || '🍽️'}</div>
-                                            )}
-                                        </div>
-                                        <div className="p-2.5">
-                                            <p className="text-xs font-bold text-gray-800 dark:text-white leading-tight line-clamp-2 mb-1">{item.name}</p>
-                                            <p className="text-xs font-black text-orange-500 mb-2">₦{(item.price || 0).toLocaleString()}</p>
-                                            <button
-                                                onClick={() => addToCart && addToCart({ ...item, quantity: 1 })}
-                                                className="w-full bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-bold py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1 active:scale-95"
-                                            >
-                                                <Plus className="w-3 h-3" /> Add
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    ));
-                })()}
 
             </div>
 
@@ -875,8 +956,28 @@ const MarketProductCard = ({ item, onInteract, isOpen, onNotify }) => {
 
 
 // --- 5. MARKET VIEW (WITH OPENING HOURS CHECK) ---
-export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData, city, vendor, user, vendorMetadata, onLoadMore, hasMore, isLoadingMore }) => {
+export const MarketView = ({ setCurrentView, addToCart, city, vendor, user, vendorMetadata }) => {
     const [category, setCategory] = useState('All');
+    const [vendorSearch, setVendorSearch] = useState('');
+    const [page, setPage] = useState(0);
+    // Vendor-specific products fetched directly — no global pagination dependency
+    const [vendorItems, setVendorItems] = useState([]);
+    const [loadingItems, setLoadingItems] = useState(true);
+    const PAGE_SIZE = 7;
+
+    // Fetch this vendor's products directly from Firestore on mount / vendor change
+    useEffect(() => {
+        if (!vendor) return;
+        setLoadingItems(true);
+        setVendorItems([]);
+        import('../firebase.js').then(({ getProductsByVendor }) => {
+            getProductsByVendor(vendor).then(data => {
+                setVendorItems(data);
+                setLoadingItems(false);
+            });
+        });
+    }, [vendor]);
+
     // 🟢 CHECK HOURS
     const currentHour = new Date().getHours();
     const currentMinute = new Date().getMinutes();
@@ -886,7 +987,6 @@ export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData,
     const openTime = parseFloat(vendorInfo.openTime?.replace(':', '.') || "8.00");
     const closeTime = parseFloat(vendorInfo.closeTime?.replace(':', '.') || "22.00");
 
-    // 🟢 Must be within operating hours AND manually accepting orders
     const isWithinHours = currentTime >= openTime && currentTime < closeTime;
     const isManuallyOffline = vendorInfo.isAcceptingOrders === false;
     const isOpen = isWithinHours && !isManuallyOffline;
@@ -899,35 +999,33 @@ export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData,
         } catch (e) { console.error(e); }
     };
 
-    if (loadingData && marketData.length === 0) return <div className="flex justify-center items-center h-full"><div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div></div>;
-
-    const items = marketData.filter(p => {
-        const productVendor = p.vendor ? p.vendor.toLowerCase() : "";
-        const selectedVendor = vendor ? vendor.toLowerCase() : "";
-        const vendorMatch = productVendor.includes(selectedVendor) || selectedVendor.includes(productVendor);
+    const items = vendorItems.filter(p => {
         const categoryMatch = category === 'All' ? true : p.category === category;
-        if (vendorMatch) return categoryMatch;
-        const locationMatch = !p.location || (p.location && city && p.location.toLowerCase() === city.toLowerCase());
-        return locationMatch && vendorMatch && categoryMatch;
+        const searchMatch = vendorSearch
+            ? p.name?.toLowerCase().includes(vendorSearch.toLowerCase()) || p.desc?.toLowerCase().includes(vendorSearch.toLowerCase())
+            : true;
+        return categoryMatch && searchMatch;
     });
+
+    const totalPages = Math.ceil(items.length / PAGE_SIZE);
+    const safePage = Math.min(page, Math.max(0, totalPages - 1));
+    const pageItems = items.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
 
     const categories = [{ id: 'All', label: 'All', icon: null }, { id: 'drinks', label: 'Drinks', icon: Zap }, { id: 'snacks', label: 'Snacks', icon: Cookie }];
 
     return (
         <ViewContainer title={`${vendor} Menu`} showBack onBack={() => setCurrentView('vendors')}>
-            {/* 🟢 CLOSED BANNER */}
+            {/* CLOSED BANNER */}
             {!isOpen && (
-                <div className="bg-red-500 text-white p-3 rounded-xl mb-4 flex items-center justify-between shadow-md">
-                    <div className="flex items-center gap-2">
-                        <Clock className="w-5 h-5" />
-                        <span className="font-bold text-sm">
-                            {isManuallyOffline ? "Store is currently Offline" : `Closed (Opens ${vendorInfo.openTime || "8:00"})`}
-                        </span>
-                    </div>
+                <div className="bg-red-500 text-white p-3 rounded-xl mb-4 flex items-center gap-2 shadow-md">
+                    <Clock className="w-5 h-5" />
+                    <span className="font-bold text-sm">
+                        {isManuallyOffline ? "Store is currently Offline" : `Closed · Opens ${vendorInfo.openTime || "8:00"}`}
+                    </span>
                 </div>
             )}
 
-            {/* 🟢 VENDOR HEADER METADATA */}
+            {/* PREP TIME BANNER */}
             {isOpen && vendorInfo.avgWaitTime && (
                 <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 rounded-xl p-3 mb-4 flex items-center gap-2 shadow-sm">
                     <Clock className="w-5 h-5 text-blue-500" />
@@ -938,24 +1036,80 @@ export const MarketView = ({ setCurrentView, addToCart, marketData, loadingData,
                 </div>
             )}
 
-            <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide px-1">{categories.map(cat => (<DietaryFilter key={cat.id} icon={cat.icon} label={cat.label} active={category === cat.id} onClick={() => setCategory(cat.id)} />))}</div>
+            {/* SEARCH BAR */}
+            <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 px-4 py-2.5 rounded-2xl mb-3 focus-within:ring-2 focus-within:ring-orange-400 transition-all">
+                <Search className="w-4 h-4 text-gray-400 shrink-0" />
+                <input
+                    type="text"
+                    placeholder={`Search ${vendor || 'menu'}...`}
+                    value={vendorSearch}
+                    onChange={e => { setVendorSearch(e.target.value); setPage(0); }}
+                    className="bg-transparent border-none outline-none w-full text-sm text-gray-700 dark:text-white placeholder-gray-400 font-medium"
+                />
+                {vendorSearch && (
+                    <button onClick={() => setVendorSearch('')} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+                )}
+            </div>
+
+            <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide px-1">
+                {categories.map(cat => (
+                    <DietaryFilter key={cat.id} icon={cat.icon} label={cat.label} active={category === cat.id} onClick={() => { setCategory(cat.id); setPage(0); }} />
+                ))}
+            </div>
 
             <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide min-h-0">
-                <div className="grid grid-cols-1 gap-4 pb-4">{items.map((item) => (
-                    <MarketProductCard
-                        key={item.id}
-                        item={item}
-                        onInteract={isOpen ? addToCart : () => alert("Vendor is currently closed.")}
-                        isOpen={isOpen}
-                        onNotify={handleNotify}
-                    />
-                ))}
-                    {hasMore && (
-                        <button onClick={onLoadMore} disabled={isLoadingMore} className="w-full py-3 bg-gray-100 dark:bg-gray-800 text-gray-500 font-bold rounded-xl mt-4 active:scale-95">
-                            {isLoadingMore ? "Loading..." : "Load More Food 🍲"}
-                        </button>
-                    )}
-                </div>
+                {loadingItems ? (
+                    <div className="grid grid-cols-1 gap-4 pb-4">
+                        {[1,2,3].map(i => (
+                            <div key={i} className="h-32 rounded-3xl bg-gray-200 dark:bg-gray-800 animate-pulse" />
+                        ))}
+                    </div>
+                ) : items.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-center">
+                        <p className="text-4xl mb-3">🍽️</p>
+                        <p className="font-bold text-gray-500 dark:text-gray-400">
+                            {vendorSearch ? `No results for "${vendorSearch}"` : 'No items on the menu right now'}
+                        </p>
+                    </div>
+                ) : (
+                    <>
+                        <div className="grid grid-cols-1 gap-4 pb-3">
+                            {pageItems.map(item => (
+                                <MarketProductCard
+                                    key={item.id}
+                                    item={item}
+                                    onInteract={isOpen ? addToCart : () => alert("Vendor is currently closed.")}
+                                    isOpen={isOpen}
+                                    onNotify={handleNotify}
+                                />
+                            ))}
+                        </div>
+
+                        {/* PAGE NAVIGATION */}
+                        {totalPages > 1 && (
+                            <div className="flex items-center justify-between px-1 py-3 border-t border-gray-100 dark:border-gray-800 mt-2">
+                                <button
+                                    onClick={() => { setPage(p => Math.max(0, p - 1)); window.scrollTo(0,0); }}
+                                    disabled={safePage === 0}
+                                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl font-bold text-sm bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 disabled:opacity-30 active:scale-95 transition-all"
+                                >
+                                    <ArrowLeft className="w-4 h-4" /> Prev
+                                </button>
+                                <span className="text-xs font-black text-gray-500 dark:text-gray-400">
+                                    Page {safePage + 1} of {totalPages}
+                                    <span className="text-gray-400 font-normal ml-1">({items.length} items)</span>
+                                </span>
+                                <button
+                                    onClick={() => { setPage(p => Math.min(totalPages - 1, p + 1)); window.scrollTo(0,0); }}
+                                    disabled={safePage >= totalPages - 1}
+                                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl font-bold text-sm bg-orange-500 text-white disabled:opacity-30 active:scale-95 transition-all shadow-md shadow-orange-300"
+                                >
+                                    Next <ArrowLeft className="w-4 h-4 rotate-180" />
+                                </button>
+                            </div>
+                        )}
+                    </>
+                )}
             </div>
         </ViewContainer>
     );
@@ -1753,6 +1907,49 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
     const [showModal, setShowModal] = useState(false);
     const [confirmedOrder, setConfirmedOrder] = useState(null);
 
+    // Cart validation: keyed by cartId → { type: 'soldOut'|'priceChanged'|'removed', oldPrice?, newPrice? }
+    const [cartWarnings, setCartWarnings] = useState({});
+    const [validating, setValidating] = useState(false);
+
+    // Validate every cart item against current Firestore state whenever the cart panel opens
+    useEffect(() => {
+        if (currentView !== 'cart' || cart.length === 0) return;
+
+        const validate = async () => {
+            setValidating(true);
+            const warnings = {};
+            const updatedCart = cart.map(i => ({ ...i }));
+
+            await Promise.all(cart.map(async (item, idx) => {
+                if (!item.id) return;
+                try {
+                    const snap = await getDoc(doc(db, 'products', item.id));
+                    if (!snap.exists()) {
+                        warnings[item.cartId] = { type: 'removed' };
+                        return;
+                    }
+                    const current = snap.data();
+                    if ((current.stock ?? 1) === 0) {
+                        warnings[item.cartId] = { type: 'soldOut' };
+                    } else if (current.price !== item.price) {
+                        warnings[item.cartId] = { type: 'priceChanged', oldPrice: item.price, newPrice: current.price };
+                        updatedCart[idx] = { ...updatedCart[idx], price: current.price };
+                    }
+                } catch { /* network issue — skip silently */ }
+            }));
+
+            setCartWarnings(warnings);
+            // Silently sync prices in cart state
+            const pricesDiffer = updatedCart.some((u, i) => u.price !== cart[i].price);
+            if (pricesDiffer) setCart(updatedCart);
+            setValidating(false);
+        };
+
+        validate();
+    }, [currentView]); // re-validate every time cart opens
+
+    const hasBadItem = Object.values(cartWarnings).some(w => w.type === 'soldOut' || w.type === 'removed');
+
     // Compute max wait time across vendors in cart
     const cartMaxWaitTime = useMemo(() => {
         let max = 0;
@@ -1766,6 +1963,7 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
     const handleOrderSuccess = (placedOrderId) => {
         setShowModal(false);
         setCart([]);
+        setCartWarnings({});
         setConfirmedOrder({ orderId: placedOrderId, waitTime: cartMaxWaitTime });
     };
 
@@ -1784,81 +1982,140 @@ export const CartOverlay = ({ cart, currentView, setCurrentView, marketSection, 
                 />
             )}
             <PaymentModal isOpen={showModal} onClose={() => setShowModal(false)} total={cartTotal} paymentMethod={paymentMethod} user={user} cart={cart} globalWallet={globalWallet} onSuccess={handleOrderSuccess} city={city} vendorMetadata={vendorMetadata} vendor={vendor} deliveryPricingConfig={deliveryPricingConfig} globalCustomerCoords={globalCustomerCoords} />
+            {/* CART SLIDE-IN PANEL */}
             <div className="fixed inset-0 z-50 flex justify-end pointer-events-none">
-                <div className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${currentView === 'cart' ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`} onClick={() => setCurrentView(marketSection ? 'market' : 'home')} />
-                <div className={`relative bg-white dark:bg-gray-900 shadow-2xl w-full max-w-md h-full flex flex-col pointer-events-auto transition-transform duration-300 transform ${currentView === 'cart' ? 'translate-x-0' : 'translate-x-full'}`}>
-                    <div className="p-6 border-b dark:border-gray-800 flex justify-between items-center"><h2 className="text-2xl font-bold dark:text-white">Cart</h2><button onClick={() => setCurrentView('home')}><X className="w-6 h-6" /></button></div>
-                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                        {cart.length === 0 ? <div className="text-center text-gray-400 mt-10"><ShoppingCart className="w-16 h-16 mx-auto mb-4 opacity-20" /><p>Empty</p></div> :
-                            cart.map(item => <div key={item.cartId} className="flex justify-between items-center bg-gray-50 dark:bg-gray-800 p-4 rounded-xl"><div className="flex gap-3"><span className="text-2xl">{item.imageUrl ? <img src={item.imageUrl} className="w-12 h-12 object-cover rounded-lg" /> : item.image}</span><div><p className="font-bold text-sm dark:text-white">{item.name}</p>{item.selectedAddons && item.selectedAddons.length > 0 && <p className="text-[10px] text-orange-500 font-bold">+ {item.selectedAddons.map(a => a.name).join(', ')}</p>}<p className="text-xs text-gray-500">₦{(item.price + (item.selectedAddons ? item.selectedAddons.reduce((s, a) => s + (a.price || 0), 0) : 0)).toLocaleString()}</p></div></div><button onClick={() => removeFromCart(item.cartId)} className="text-red-500"><Minus className="w-4 h-4" /></button></div>)}
+                <div className={`absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity duration-300 ${currentView === 'cart' ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`} onClick={() => setCurrentView(marketSection ? 'market' : 'home')} />
+                <div className={`relative bg-white dark:bg-gray-900 shadow-2xl w-full max-w-md h-full flex flex-col pointer-events-auto transition-transform duration-300 transform rounded-l-3xl ${currentView === 'cart' ? 'translate-x-0' : 'translate-x-full'}`}>
+
+                    {/* CART HEADER */}
+                    <div className="px-6 pt-6 pb-4 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
+                        <div>
+                            <h2 className="text-2xl font-black text-gray-900 dark:text-white font-[Fredoka]">My Cart</h2>
+                            <p className="text-xs text-gray-400 mt-0.5">{cart.length} {cart.length === 1 ? 'item' : 'items'}</p>
+                        </div>
+                        <button onClick={() => setCurrentView(marketSection ? 'market' : 'home')} className="w-9 h-9 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center text-gray-500 hover:text-gray-900 dark:hover:text-white active:scale-90 transition-all">
+                            <X className="w-4 h-4" />
+                        </button>
                     </div>
-                    <div className="p-6 border-t dark:border-gray-800 bg-gray-50 dark:bg-gray-900 space-y-4">
-                        {cart.length > 0 && (
-                            <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-xl flex">
-                                <button onClick={() => setPaymentMethod('paystack')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${paymentMethod === 'paystack' ? 'bg-white shadow dark:bg-gray-700 dark:text-white' : 'text-gray-500'}`}><CreditCard className="w-4 h-4" /> Paystack</button>
-                            </div>
-                        )}
-                        {/* DELIVERY ETA BANNER */}
-                        {cart.length > 0 && cartMaxWaitTime > 0 && (
-                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-xl px-4 py-3 flex items-center gap-3">
-                                <Clock className="w-5 h-5 text-blue-500 shrink-0" />
-                                <div>
-                                    <p className="text-xs font-black text-blue-800 dark:text-blue-200">Estimated Delivery</p>
-                                    <p className="text-sm font-bold text-blue-600 dark:text-blue-300">~{cartMaxWaitTime + 15}–{cartMaxWaitTime + 35} mins</p>
-                                    <p className="text-[10px] text-blue-400">{cartMaxWaitTime} min prep + delivery time</p>
-                                </div>
-                            </div>
-                        )}
-                        <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="text-2xl font-black dark:text-white">₦{cartTotal.toLocaleString()}</span></div>
 
-                        {/* 🔴 CLOSED VENDOR BLOCKER */}
-                        {hasClosedVendor && (
-                            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-3 text-center">
-                                <p className="text-red-600 dark:text-red-400 font-black text-sm">🔴 Vendor Closed</p>
-                                <p className="text-red-500 text-xs mt-1">
-                                    <b>{closedVendors.join(', ')}</b> {closedVendors.length > 1 ? 'are' : 'is'} currently closed.
-                                    {vendorMetadata?.[closedVendors[0]]?.openTime && (
-                                        <> Opens at <b>{vendorMetadata[closedVendors[0]].openTime}</b>.</>
-                                    )}
-                                </p>
+                    {/* CART ITEMS */}
+                    <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 scrollbar-hide">
+                        {/* Validation banner */}
+                        {validating && (
+                            <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-2xl px-4 py-3 text-xs text-gray-500 font-semibold">
+                                <div className="animate-spin w-3.5 h-3.5 border-2 border-orange-400 border-t-transparent rounded-full shrink-0" />
+                                Checking item availability...
+                            </div>
+                        )}
+                        {!validating && hasBadItem && (
+                            <div className="flex items-start gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl px-4 py-3">
+                                <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+                                <p className="text-xs text-red-700 dark:text-red-400 font-semibold">Some items are no longer available. Remove them to proceed.</p>
                             </div>
                         )}
 
-                        {/* 🔒 GUEST CHECKOUT WALL */}
-                        {!user && cart.length > 0 ? (
-                            <div className="space-y-3">
-                                <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4 text-center">
-                                    <p className="text-orange-700 dark:text-orange-300 font-black text-sm mb-1">Sign in to complete your order</p>
-                                    <p className="text-orange-600 dark:text-orange-400 text-xs">Your cart is saved — create a free account or log in to checkout.</p>
+                        {cart.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center h-full text-center pb-20">
+                                <div className="w-24 h-24 bg-orange-50 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
+                                    <ShoppingCart className="w-10 h-10 text-orange-300" />
                                 </div>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => setCurrentView('login')}
-                                        className="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-bold py-3.5 rounded-xl transition-colors text-sm"
-                                    >
-                                        Create Account
-                                    </button>
-                                    <button
-                                        onClick={() => setCurrentView('login')}
-                                        className="flex-1 bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-white font-bold py-3.5 rounded-xl transition-colors text-sm"
-                                    >
-                                        Log In
-                                    </button>
-                                </div>
+                                <p className="text-gray-900 dark:text-white font-black text-lg font-[Fredoka]">Your cart is empty</p>
+                                <p className="text-gray-400 text-sm mt-1">Add items from a vendor to get started</p>
+                                <button onClick={() => setCurrentView('location')} className="mt-5 bg-orange-500 text-white font-bold px-6 py-3 rounded-2xl text-sm active:scale-95 transition-transform shadow-md shadow-orange-300">
+                                    Browse Vendors
+                                </button>
                             </div>
                         ) : (
-                            <button
-                                onClick={() => setShowModal(true)}
-                                disabled={cart.length === 0 || hasClosedVendor}
-                                className={`w-full font-bold py-4 rounded-xl shadow-lg transition-colors ${hasClosedVendor
-                                    ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
-                                    : 'bg-green-600 hover:bg-green-700 text-white'
-                                    }`}
-                            >
-                                {hasClosedVendor ? '🔴 Cannot Checkout — Vendor Closed' : 'Checkout'}
-                            </button>
+                            cart.map(item => {
+                                const warning = cartWarnings[item.cartId];
+                                const isBad = warning?.type === 'soldOut' || warning?.type === 'removed';
+                                return (
+                                    <div key={item.cartId} className={`flex items-center gap-3 rounded-2xl p-3 relative ${isBad ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800' : 'bg-gray-50 dark:bg-gray-800'}`}>
+                                        <div className={`w-16 h-16 rounded-xl overflow-hidden shrink-0 bg-gray-200 dark:bg-gray-700 ${isBad ? 'opacity-50' : ''}`}>
+                                            {item.imageUrl
+                                                ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                                                : <div className="w-full h-full flex items-center justify-center text-2xl">{item.image || '🍽️'}</div>
+                                            }
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className={`font-bold text-sm leading-tight line-clamp-1 ${isBad ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>{item.name}</p>
+                                            {warning?.type === 'soldOut' && <p className="text-[10px] font-black text-red-500 mt-0.5">Sold out — remove to checkout</p>}
+                                            {warning?.type === 'removed' && <p className="text-[10px] font-black text-red-500 mt-0.5">No longer available</p>}
+                                            {warning?.type === 'priceChanged' && (
+                                                <p className="text-[10px] font-black text-amber-600 mt-0.5">
+                                                    Price updated: <s className="opacity-60">₦{(warning.oldPrice || 0).toLocaleString()}</s> → ₦{(warning.newPrice || 0).toLocaleString()}
+                                                </p>
+                                            )}
+                                            {!warning && item.selectedAddons && item.selectedAddons.length > 0 && (
+                                                <p className="text-[10px] text-orange-500 font-semibold mt-0.5">+ {item.selectedAddons.map(a => a.name).join(', ')}</p>
+                                            )}
+                                            {!isBad && (
+                                                <p className="text-xs font-black text-orange-500 mt-1">
+                                                    ₦{(item.price + (item.selectedAddons ? item.selectedAddons.reduce((s, a) => s + (a.price || 0), 0) : 0)).toLocaleString()}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <button onClick={() => { removeFromCart(item.cartId); setCartWarnings(prev => { const n = { ...prev }; delete n[item.cartId]; return n; }); }} className="w-8 h-8 rounded-full bg-red-50 dark:bg-red-900/20 text-red-500 flex items-center justify-center active:scale-90 transition-all shrink-0">
+                                            <Minus className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                );
+                            })
                         )}
                     </div>
+
+                    {/* CART FOOTER */}
+                    {cart.length > 0 && (
+                        <div className="px-5 pb-6 pt-4 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 space-y-3 rounded-l-3xl">
+
+                            {/* ETA pill */}
+                            {cartMaxWaitTime > 0 && (
+                                <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-900/20 rounded-2xl px-4 py-3">
+                                    <Clock className="w-4 h-4 text-blue-500 shrink-0" />
+                                    <div className="flex-1">
+                                        <p className="text-xs font-black text-blue-800 dark:text-blue-200">Est. Delivery: ~{cartMaxWaitTime + 15}–{cartMaxWaitTime + 35} mins</p>
+                                        <p className="text-[10px] text-blue-400">{cartMaxWaitTime} min prep + rider time</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Subtotal */}
+                            <div className="flex items-center justify-between px-1">
+                                <span className="text-gray-500 text-sm font-semibold">Subtotal</span>
+                                <span className="text-2xl font-black text-gray-900 dark:text-white">₦{cartTotal.toLocaleString()}</span>
+                            </div>
+
+                            {/* Closed vendor warning */}
+                            {hasClosedVendor && (
+                                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-3 text-center">
+                                    <p className="text-red-600 dark:text-red-400 font-black text-sm">🔴 Vendor Closed</p>
+                                    <p className="text-red-500 text-xs mt-1">
+                                        <b>{closedVendors.join(', ')}</b> {closedVendors.length > 1 ? 'are' : 'is'} closed.
+                                        {vendorMetadata?.[closedVendors[0]]?.openTime && <> Opens {vendorMetadata[closedVendors[0]].openTime}.</>}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Guest wall / Checkout button */}
+                            {!user ? (
+                                <div className="space-y-2">
+                                    <p className="text-center text-xs text-gray-500 font-semibold">Sign in to place your order</p>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => setCurrentView('login')} className="flex-1 bg-orange-500 text-white font-bold py-3.5 rounded-2xl text-sm active:scale-95 transition-transform shadow-md shadow-orange-300">Create Account</button>
+                                        <button onClick={() => setCurrentView('login')} className="flex-1 bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-white font-bold py-3.5 rounded-2xl text-sm active:scale-95 transition-transform">Log In</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <button
+                                    onClick={() => setShowModal(true)}
+                                    disabled={hasClosedVendor || hasBadItem || validating}
+                                    className={`w-full font-black py-4 rounded-2xl text-sm transition-all active:scale-[0.98] shadow-lg ${(hasClosedVendor || hasBadItem || validating) ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed shadow-none' : 'bg-orange-500 hover:bg-orange-600 text-white shadow-orange-400/40'}`}
+                                >
+                                    {validating ? 'Checking items...' : hasClosedVendor ? 'Cannot Checkout — Vendor Closed' : hasBadItem ? 'Remove unavailable items first' : `Checkout  ₦${cartTotal.toLocaleString()}`}
+                                </button>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
         </>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-    ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, Search, Download, X, Share, MapPin, Package, LogIn
+    ShoppingCart, Database, Bike, Sun, Moon, LogOut, Home, Wallet, ChefHat, ShoppingBag, Download, X, Share, MapPin, Package, LogIn
 } from 'lucide-react';
 import { auth, getAllProducts, getPaginatedProducts, getAdminRole, logout, getVendorLogos, getGlobalVendors, logVisit, checkGoogleRedirectResult, getDeliveryPricingConfig, setupForegroundNotifications } from './firebase.js';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -121,6 +121,41 @@ export default function EatAi() {
         });
     }, []);
 
+    // 🟢 FORCE SW UPDATE — on every app open, check for a new service worker and reload the page when one activates.
+    // This ensures all installed PWA instances get the latest version immediately.
+    useEffect(() => {
+        if (!('serviceWorker' in navigator)) return;
+
+        // Reload the page whenever a new SW takes control (skipWaiting fires this)
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            window.location.reload();
+        });
+
+        // Actively tell the browser to check for a new SW right now (don't wait 24 h)
+        navigator.serviceWorker.getRegistration().then(reg => {
+            if (!reg) return;
+            reg.update().catch(() => {}); // silent — offline-safe
+
+            // If there's already a waiting SW (installed but not yet active), activate it
+            if (reg.waiting) {
+                reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                return;
+            }
+
+            // Watch for a new SW being installed during this session
+            reg.addEventListener('updatefound', () => {
+                const newWorker = reg.installing;
+                if (!newWorker) return;
+                newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        // New SW installed — tell it to activate immediately
+                        newWorker.postMessage({ type: 'SKIP_WAITING' });
+                    }
+                });
+            });
+        });
+    }, []);
+
     // Visitor Tracking Effect
     useEffect(() => {
         const today = new Date().toISOString().split('T')[0];
@@ -166,14 +201,16 @@ export default function EatAi() {
                         const a = data.address || {};
                         area = a.city || a.town || a.village || a.suburb || a.county || 'Your Area';
                         setDetectedArea(area);
-                    } catch { /* silently fail */ }
+                    } catch { /* silently fail — reverse geocode is best-effort */ }
                     // Cache for next session — helps iOS users who block repeated prompts
                     try {
                         localStorage.setItem('eatai_last_coords', JSON.stringify({ lat: coords.lat, lng: coords.lng, area }));
                     } catch { /* ignore */ }
                     setLocationLoading(false);
                 },
-                () => {
+                (err) => {
+                    // Location was denied or unavailable — surface this to the user
+                    console.warn('Geolocation error:', err.code, err.message);
                     setLocationDenied(true);
                     setLocationLoading(false);
                 },
@@ -449,6 +486,51 @@ export default function EatAi() {
 
                 {notification && <Toast message={notification} />}
 
+                {/* 🟠 LOCATION PERMISSION BANNER — shown when user denied or browser blocked location */}
+                {locationDenied && (
+                    <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-white px-4 py-3 shadow-lg flex items-center gap-3 animate-slide-down">
+                        <MapPin className="w-5 h-5 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <p className="font-bold text-sm leading-tight">Location access needed</p>
+                            <p className="text-xs opacity-90 mt-0.5">Allow location so we can calculate your delivery fee accurately.</p>
+                        </div>
+                        <button
+                            onClick={() => {
+                                setLocationDenied(false);
+                                setLocationLoading(true);
+                                if (navigator.geolocation) {
+                                    navigator.geolocation.getCurrentPosition(
+                                        async (pos) => {
+                                            const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                                            setGlobalCustomerCoords(coords);
+                                            let area = 'Your Area';
+                                            try {
+                                                const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.lat}&lon=${coords.lng}`, { headers: { 'Accept-Language': 'en' } });
+                                                const d = await r.json();
+                                                const a = d.address || {};
+                                                area = a.city || a.town || a.village || a.suburb || a.county || 'Your Area';
+                                                setDetectedArea(area);
+                                            } catch { /* ignore */ }
+                                            try { localStorage.setItem('eatai_last_coords', JSON.stringify({ lat: coords.lat, lng: coords.lng, area })); } catch { /* ignore */ }
+                                            setLocationLoading(false);
+                                        },
+                                        () => { setLocationDenied(true); setLocationLoading(false); },
+                                        { enableHighAccuracy: false, timeout: 15000, maximumAge: 0 }
+                                    );
+                                } else {
+                                    setLocationLoading(false);
+                                }
+                            }}
+                            className="shrink-0 bg-white text-amber-600 font-bold text-xs px-3 py-1.5 rounded-full shadow-sm active:scale-95 transition-transform"
+                        >
+                            Allow
+                        </button>
+                        <button onClick={() => setLocationDenied(false)} className="shrink-0 text-white/80 hover:text-white p-1">
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
+
                 {/* 🟢 SMART INSTALL BANNER */}
                 {showInstallBanner && (
                     <div className="fixed top-0 left-0 right-0 z-50 bg-orange-600 text-white p-4 shadow-lg animate-slide-down flex justify-between items-center">
@@ -550,17 +632,10 @@ export default function EatAi() {
                         <MarketView
                             setCurrentView={setCurrentView}
                             addToCart={addToCart}
-                            marketData={marketData}
-                            loadingData={loadingData}
                             city={city}
                             vendor={vendor}
                             user={user}
                             vendorMetadata={vendorMetadata}
-                            onLoadMore={handleLoadMore}
-                            hasMore={hasMore}
-                            isLoadingMore={isLoadingMore}
-                            favorites={favorites}
-                            toggleFavorite={toggleFavorite}
                         />
                     }
 
@@ -615,14 +690,22 @@ export default function EatAi() {
                     <div className="fixed bottom-24 right-6 z-50 animate-bounce"><button onClick={() => setCurrentView('logistics')} className="bg-purple-900 text-white font-bold text-sm px-4 py-2 rounded-full shadow-xl flex items-center gap-2 border border-purple-700 hover:bg-purple-800 transition-colors"><Bike className="w-4 h-4" /> Logistics Hub</button></div>
                 )}
 
-                {/* PERSISTENT BOTTOM NAV — visible for guests and logged-in users */}
-                {currentView !== 'login' && (
-                    <nav className="flex-none bg-white/90 backdrop-blur-md dark:bg-gray-900/90 border-t border-gray-200 dark:border-gray-800 px-6 py-3 flex justify-around items-center z-40 safe-area-pb">
-                        <button onClick={() => setCurrentView('home')} className={`flex flex-col items-center ${currentView === 'home' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Home className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Home</span></button>
-                        <button onClick={() => setCurrentView('location')} className={`flex flex-col items-center ${['location', 'vendors', 'market'].includes(currentView) ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><Search className="w-6 h-6" /><span className="text-[10px] mt-1 font-medium">Market</span></button>
-                        <button onClick={() => setCurrentView('cart')} className={`flex flex-col items-center relative ${currentView === 'cart' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}><ShoppingCart className="w-6 h-6" />{cart.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full font-bold">{cart.length}</span>}<span className="text-[10px] mt-1 font-medium">Cart</span></button>
-                    </nav>
-                )}
+                {/* PERSISTENT BOTTOM NAV — always visible */}
+                <nav className="flex-none bg-white/95 backdrop-blur-md dark:bg-gray-900/95 border-t border-gray-200 dark:border-gray-800 px-8 py-3 flex justify-around items-center z-40 safe-area-pb shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.3)]">
+                    <button onClick={() => setCurrentView('home')} className={`flex flex-col items-center gap-0.5 transition-colors ${currentView === 'home' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}>
+                        <Home className="w-6 h-6" />
+                        <span className="text-[10px] font-semibold">Home</span>
+                    </button>
+                    <button onClick={() => setCurrentView('location')} className={`flex flex-col items-center gap-0.5 transition-colors ${['location', 'vendors', 'market'].includes(currentView) ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}>
+                        <ShoppingBag className="w-6 h-6" />
+                        <span className="text-[10px] font-semibold">Market</span>
+                    </button>
+                    <button onClick={() => setCurrentView('cart')} className={`flex flex-col items-center gap-0.5 relative transition-colors ${currentView === 'cart' ? 'text-orange-500' : 'text-gray-400 dark:text-gray-500'}`}>
+                        <ShoppingCart className="w-6 h-6" />
+                        {cart.length > 0 && <span className="absolute -top-1 right-0 w-4 h-4 bg-red-500 text-white text-[9px] flex items-center justify-center rounded-full font-black">{cart.length}</span>}
+                        <span className="text-[10px] font-semibold">Cart</span>
+                    </button>
+                </nav>
             </div>
         </div>
     );

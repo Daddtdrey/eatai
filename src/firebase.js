@@ -308,13 +308,14 @@ export const saveVendorSides = async (vendorName, sides) => {
   } catch (e) { console.error(e); }
 };
 
-// 🟢 NEW: Save vendor GPS location (and optionally opening hours)
-export const saveVendorLocation = async (vendorName, lat, lng, openTime, closeTime, avgWaitTime) => {
+// 🟢 NEW: Save vendor GPS location (and optionally opening hours, category)
+export const saveVendorLocation = async (vendorName, lat, lng, openTime, closeTime, avgWaitTime, category) => {
   try {
     const payload = { lat, lng };
     if (openTime !== undefined) payload.openTime = openTime;
     if (closeTime !== undefined) payload.closeTime = closeTime;
     if (avgWaitTime !== undefined) payload.avgWaitTime = avgWaitTime;
+    if (category !== undefined) payload.category = category;
     await setDoc(doc(db, "vendors", vendorName), payload, { merge: true });
     return true;
   } catch (e) { console.error(e); return false; }
@@ -333,6 +334,7 @@ export const getVendorsWithLocation = async () => {
       openTime: d.data().openTime || null,
       closeTime: d.data().closeTime || null,
       avgWaitTime: d.data().avgWaitTime || null,
+      category: d.data().category || null,
     }));
   } catch (e) { console.error(e); return []; }
 };
@@ -376,6 +378,7 @@ export const getGlobalVendors = async () => {
           lat: data.lat || null,
           lng: data.lng || null,
           avgWaitTime: data.avgWaitTime || null,
+          category: data.category || null,
         };
       }
     });
@@ -415,6 +418,38 @@ export const getPaginatedProducts = async (lastDoc = null, pageSize = 20) => {
 export const getAllProducts = async () => {
   const querySnapshot = await getDocs(collection(db, "products"));
   return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+};
+
+// Fetch all products for a specific vendor — queries all common name variants (case/trim)
+export const getProductsByVendor = async (vendorName) => {
+  try {
+    const trimmed = vendorName.trim();
+    const variants = [...new Set([trimmed, trimmed.toLowerCase(), trimmed.toUpperCase(),
+      trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase()])];
+    const snaps = await Promise.all(
+      variants.map(v => getDocs(query(collection(db, "products"), where("vendor", "==", v))))
+    );
+    const seen = new Set();
+    const items = [];
+    snaps.forEach(snap => snap.docs.forEach(d => {
+      if (!seen.has(d.id)) { seen.add(d.id); items.push({ id: d.id, ...d.data() }); }
+    }));
+    return items;
+  } catch (e) {
+    console.error("getProductsByVendor error:", e);
+    return [];
+  }
+};
+
+// Rename all products from one vendor name to another (used by super admin merge tool)
+export const mergeVendorProducts = async (fromName, toName) => {
+  const q = query(collection(db, "products"), where("vendor", "==", fromName));
+  const snap = await getDocs(q);
+  if (snap.empty) return 0;
+  const batch = writeBatch(db);
+  snap.docs.forEach(d => batch.update(doc(db, "products", d.id), { vendor: toName }));
+  await batch.commit();
+  return snap.docs.length;
 };
 
 // 🟢 UPDATED: Auto-create vendor when adding product

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
     Truck, CheckCircle, History, Box, Smile, Image as ImageIcon, Upload,
     Wrench, BarChart3, Package as PackageIcon, Volume2, Bell, PlayCircle,
-    MapPin, Phone, RefreshCw, Plus, X, ListPlus, Tag, MessageCircle
+    MapPin, Phone, RefreshCw, Plus, X, ListPlus, Tag, MessageCircle,
+    ChevronDown, ChevronUp, Search
 } from 'lucide-react';
 
 // 🟢 IMPORTS: Added explicit extensions to fix build errors
@@ -16,12 +17,28 @@ import {
     uploadImage, saveVendorLogo, getAdminRole, requestNotificationPermission,
     getBanners, saveBanner, deleteBanner, getTodayVisitors, saveVendorLocation,
     getVendorsWithLocation, getDeliveryPricingConfig, saveDeliveryPricingConfig,
-    getPromoCodes, savePromoCode, deletePromoCode, cleanCloudinaryLinks, migrateVendorProducts
+    getPromoCodes, savePromoCode, deletePromoCode, cleanCloudinaryLinks, migrateVendorProducts,
+    getAllProducts, mergeVendorProducts
 } from '../firebase.js';
 import { SUPER_ADMINS, SUB_ADMINS, LOCATIONS, VENDORS_BY_LOCATION } from '../config.js';
 import { DEFAULT_PRICING } from '../deliveryPricing.js';
 
-const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
+// Play a short beep via Web Audio API — no external file needed
+const playBeep = () => {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.4, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+    } catch (e) { /* audio not supported */ }
+};
 
 // 🟢 HELPER: Group identical items for cleaner lists. Strict cartId to avoid addon collisions.
 const groupItems = (items) => {
@@ -74,7 +91,7 @@ export const LogisticsView = ({ setCurrentView, setNotification, user }) => {
         setTimeout(() => setNotification(null), 3000);
     };
 
-    const activeTasks = tasks.filter(t => t.status === 'confirmed' || t.status === 'picked_up');
+    const activeTasks = tasks.filter(t => t.status === 'ready' || t.status === 'confirmed' || t.status === 'picked_up');
     const historyTasks = tasks.filter(t => t.status === 'delivered');
     const displayedTasks = viewMode === 'active' ? activeTasks : historyTasks;
 
@@ -324,7 +341,6 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
     const [myVendorName, setMyVendorName] = useState(null);
     const [isAcceptingOrders, setIsAcceptingOrders] = useState(true);
     const previousOrderCountRef = useRef(0);
-    const audioRef = useRef(new Audio(NOTIFICATION_SOUND));
 
     // 🟢 Promos & Stats State
     const [banners, setBanners] = useState([]);
@@ -495,12 +511,61 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
         }
     }, [myVendorName, isSuperAdmin]);
 
-    const filteredMarketData = isSuperAdmin ? marketData : marketData.filter(item => item.vendor === myVendorName);
+    // Super admin loads ALL products (not the paginated 20 passed from App.jsx)
+    const [allAdminProducts, setAllAdminProducts] = useState(null);
+    const [loadingAllProducts, setLoadingAllProducts] = useState(false);
+
+    // Merge duplicate vendor names (super admin only)
+    const [mergeFrom, setMergeFrom] = useState('');
+    const [mergeTo, setMergeTo] = useState('');
+    const [merging, setMerging] = useState(false);
+
+    // Collapsible vendor sections in inventory (super admin)
+    const [collapsedVendors, setCollapsedVendors] = useState(new Set());
+    const [inventoryFilter, setInventoryFilter] = useState('');
+    const vendorSectionRefs = React.useRef({});
+
+    const toggleVendorCollapse = (vendorName) => {
+        setCollapsedVendors(prev => {
+            const next = new Set(prev);
+            if (next.has(vendorName)) next.delete(vendorName);
+            else next.add(vendorName);
+            return next;
+        });
+    };
+
+    const jumpToVendor = (vendorName) => {
+        setCollapsedVendors(prev => {
+            const next = new Set(prev);
+            next.delete(vendorName); // ensure expanded
+            return next;
+        });
+        setTimeout(() => {
+            vendorSectionRefs.current[vendorName]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 60);
+    };
+
+    const refreshAllAdminProducts = async () => {
+        const data = await getAllProducts();
+        setAllAdminProducts(data);
+    };
+
+    useEffect(() => {
+        if (isSuperAdmin && activeTab === 'products' && allAdminProducts === null && !loadingAllProducts) {
+            setLoadingAllProducts(true);
+            getAllProducts().then(data => {
+                setAllAdminProducts(data);
+                setLoadingAllProducts(false);
+            }).catch(() => setLoadingAllProducts(false));
+        }
+    }, [isSuperAdmin, activeTab, allAdminProducts, loadingAllProducts]);
+
+    const baseMarketData = isSuperAdmin ? (allAdminProducts || marketData) : marketData;
+    const filteredMarketData = isSuperAdmin ? baseMarketData : baseMarketData.filter(item => item.vendor === myVendorName);
 
     const playNotificationSound = () => {
         if (!soundEnabled) return;
-        audioRef.current.currentTime = 0;
-        audioRef.current.play().catch(e => console.log("Audio blocked"));
+        playBeep();
         if (navigator.vibrate) navigator.vibrate([500, 200, 500]);
     };
 
@@ -541,12 +606,13 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
     }, [role, myVendorName, soundEnabled]);
 
     const enableAudio = () => {
-        audioRef.current.play().then(() => {
-            audioRef.current.pause();
-            audioRef.current.currentTime = 0;
+        try {
+            playBeep();
             setSoundEnabled(true);
             alert("🔊 Sound Enabled! Keep this screen open.");
-        }).catch(e => alert("Tap screen again to enable."));
+        } catch (e) {
+            alert("Tap screen again to enable.");
+        }
     };
 
     const handleStatusUpdate = async (orderId, newStatus) => {
@@ -573,13 +639,14 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
 
     const handleCancelEdit = () => {
         setIsEditing(false); setEditId(null); setProductFile(null);
-        setNewItem({ name: '', price: '', vendor: isSuperAdmin ? '' : (myVendorName || ""), category: 'fullMeal', desc: '', stock: 10, image: '', location: defaultLocation, hasAddons: true, addons: [] });
+        setNewItem({ name: '', price: '', vendor: isSuperAdmin ? '' : (myVendorName || ""), category: 'drinks', desc: '', stock: 10, image: '', location: defaultLocation, hasAddons: true, addons: [] });
         setNewAddonName(''); setNewAddonPrice('');
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault(); setIsSubmitting(true);
-        let imageUrl = newItem.image || '🍽️';
+        // Preserve existing imageUrl when editing without uploading a new file
+        let imageUrl = newItem.imageUrl || newItem.image || '🍽️';
         if (productFile) { imageUrl = await uploadImage(productFile); }
 
         const finalVendor = isSuperAdmin ? newItem.vendor : myVendorName;
@@ -596,7 +663,10 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
         if (isEditing) { await updateProduct(editId, productPayload); alert("Updated!"); }
         else { await addProduct(productPayload); alert("Added!"); }
 
-        handleCancelEdit(); await refreshData(); setIsSubmitting(false);
+        handleCancelEdit();
+        if (isSuperAdmin) await refreshAllAdminProducts();
+        else await refreshData();
+        setIsSubmitting(false);
     };
 
     const handleVendorLogoUpload = async () => {
@@ -605,7 +675,13 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
         await saveVendorLogo(myVendorName, vendorLogoFile);
         alert("Logo Updated!"); setIsSubmitting(false); setVendorLogoFile(null);
     }
-    const handleDelete = async (id) => { if (confirm("Delete?")) { await deleteProduct(id); await refreshData(); } };
+    const handleDelete = async (id) => {
+        if (confirm("Delete?")) {
+            await deleteProduct(id);
+            if (isSuperAdmin) await refreshAllAdminProducts();
+            else await refreshData();
+        }
+    };
 
     return (
         <ViewContainer title="Manager HQ" showBack onBack={() => setCurrentView('home')} actions={<WakeLockToggle />}>
@@ -876,13 +952,23 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                                 className="w-full p-2 text-sm rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                                             />
                                         </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-[10px] text-gray-400 mb-0.5">Vendor Category</p>
+                                            <input
+                                                type="text"
+                                                placeholder="e.g. Fast Food, Drinks, Snacks"
+                                                value={locManualInput[v.id]?.category ?? (v.category || '')}
+                                                onChange={e => setLocManualInput(prev => ({ ...prev, [v.id]: { ...prev[v.id], category: e.target.value } }))}
+                                                className="w-full p-2 text-sm rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                            />
+                                        </div>
                                         <button
                                             className="mt-4 bg-green-500 text-white px-3 py-2 rounded-lg text-xs font-bold disabled:opacity-40"
-                                            disabled={!locManualInput[v.id]?.openTime && !locManualInput[v.id]?.closeTime && !locManualInput[v.id]?.avgWaitTime}
+                                            disabled={!locManualInput[v.id]?.openTime && !locManualInput[v.id]?.closeTime && !locManualInput[v.id]?.avgWaitTime && !locManualInput[v.id]?.category}
                                             onClick={async () => {
-                                                const { openTime, closeTime, avgWaitTime } = locManualInput[v.id] || {};
+                                                const { openTime, closeTime, avgWaitTime, category } = locManualInput[v.id] || {};
                                                 setLocSaving(prev => ({ ...prev, [v.id]: true }));
-                                                await saveVendorLocation(v.id, v.lat, v.lng, openTime, closeTime, avgWaitTime);
+                                                await saveVendorLocation(v.id, v.lat, v.lng, openTime, closeTime, avgWaitTime, category);
                                                 setLocSaving(prev => ({ ...prev, [v.id]: false }));
                                                 getVendorsWithLocation().then(setVendorsWithLocation);
                                             }}
@@ -911,7 +997,17 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                         <h2 className="text-xl font-bold dark:text-white mb-2">Manage Promo Banners</h2>
                         <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 space-y-3">
                             <input type="text" placeholder="Banner Title" value={bannerTitle} onChange={e => setBannerTitle(e.target.value)} className="w-full p-3 bg-gray-50 dark:bg-gray-900 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
-                            <input type="text" placeholder="Link to Vendor (Optional, precise name)" value={bannerLink} onChange={e => setBannerLink(e.target.value)} className="w-full p-3 bg-gray-50 dark:bg-gray-900 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Link to Vendor (Optional)</label>
+                                <select
+                                    value={bannerLink}
+                                    onChange={e => setBannerLink(e.target.value)}
+                                    className="w-full p-3 bg-gray-50 dark:bg-gray-900 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 dark:text-white"
+                                >
+                                    <option value="">— No vendor link —</option>
+                                    {allVendorsList.map((v, i) => <option key={i} value={v}>{v}</option>)}
+                                </select>
+                            </div>
                             <input type="file" onChange={e => setBannerFile(e.target.files[0])} className="w-full p-3 bg-gray-50 dark:bg-gray-900 rounded-xl text-sm" accept="image/*" />
                             <button
                                 onClick={async () => {
@@ -1206,6 +1302,44 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
 
                 {activeTab === 'products' && (
                     <>
+                        {/* SUPER ADMIN — MERGE DUPLICATE VENDOR NAMES */}
+                        {isSuperAdmin && (() => {
+                            const productVendorNames = [...new Set((allAdminProducts || []).map(p => p.vendor).filter(Boolean))].sort();
+                            return (
+                                <div className="bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-800/40 rounded-2xl p-4 mb-6">
+                                    <h3 className="font-black text-yellow-800 dark:text-yellow-300 text-sm mb-1">🔀 Merge Duplicate Vendor Names</h3>
+                                    <p className="text-xs text-yellow-600 dark:text-yellow-500 mb-3">Renames all products from one vendor name to another in one click.</p>
+                                    <div className="flex gap-2 flex-wrap">
+                                        <select value={mergeFrom} onChange={e => setMergeFrom(e.target.value)} className="flex-1 min-w-0 p-2.5 text-sm rounded-xl bg-white dark:bg-gray-800 border border-yellow-300 dark:border-yellow-700 dark:text-white">
+                                            <option value="">From (duplicate / wrong name)</option>
+                                            {productVendorNames.map(v => <option key={v} value={v}>{v}</option>)}
+                                        </select>
+                                        <select value={mergeTo} onChange={e => setMergeTo(e.target.value)} className="flex-1 min-w-0 p-2.5 text-sm rounded-xl bg-white dark:bg-gray-800 border border-yellow-300 dark:border-yellow-700 dark:text-white">
+                                            <option value="">Into (correct name to keep)</option>
+                                            {productVendorNames.map(v => <option key={v} value={v}>{v}</option>)}
+                                        </select>
+                                        <button
+                                            disabled={!mergeFrom || !mergeTo || mergeFrom === mergeTo || merging}
+                                            onClick={async () => {
+                                                if (!confirm(`Rename ALL products from "${mergeFrom}" → "${mergeTo}"?`)) return;
+                                                setMerging(true);
+                                                try {
+                                                    const count = await mergeVendorProducts(mergeFrom, mergeTo);
+                                                    alert(`✅ Merged ${count} products into "${mergeTo}"`);
+                                                    setMergeFrom(''); setMergeTo('');
+                                                    refreshAllAdminProducts();
+                                                } catch (e) { alert('Merge failed: ' + e.message); }
+                                                setMerging(false);
+                                            }}
+                                            className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-4 py-2.5 rounded-xl text-sm disabled:opacity-40 transition-colors shrink-0"
+                                        >
+                                            {merging ? 'Merging...' : 'Merge'}
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+
                         <div id="admin-form" className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 mb-8"><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-gray-800 dark:text-white">{isEditing ? 'Edit Item' : 'Add Item'}</h3>{isEditing && <button onClick={handleCancelEdit} className="text-xs text-red-500">Cancel</button>}</div>
 
                             {/* 🟢 MANAGE ADDONS BUTTON */}
@@ -1246,7 +1380,7 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                     ) : (
                                         <input required placeholder="Vendor" disabled className="p-3 rounded-xl border-none w-full dark:text-white bg-gray-200 dark:bg-gray-600" value={newItem.vendor || ''} />
                                     )}
-                                    <select className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-none w-full dark:text-white" value={newItem.category || 'fullMeal'} onChange={e => setNewItem({ ...newItem, category: e.target.value })}><option value="fullMeal">Meal</option><option value="fitness">Fitness</option><option value="pregnancy">Pregnancy</option><option value="period">Period</option><option value="male">Male</option><option value="normal">Normal</option></select>
+                                    <select className="p-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-none w-full dark:text-white" value={newItem.category || 'drinks'} onChange={e => setNewItem({ ...newItem, category: e.target.value })}><option value="drinks">Drink</option><option value="snacks">Snack</option></select>
                                 </div>
 
                                 <div className="bg-gray-100 dark:bg-gray-700 p-3 rounded-xl"><label className="text-xs text-gray-500 mb-1 block uppercase">Location</label>
@@ -1262,6 +1396,12 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                     {/* 🟢 FIX: Exposed file input properly and styled it */}
                                     <div className="flex flex-col justify-center bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
                                         <label className="text-[10px] text-gray-400 font-bold mb-1 uppercase flex items-center gap-1"><ImageIcon className="w-3 h-3"/> Product Image</label>
+                                        {isEditing && newItem.imageUrl && !productFile && (
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <img src={newItem.imageUrl} alt="current" className="w-10 h-10 rounded-lg object-cover border border-gray-200" />
+                                                <span className="text-[10px] text-green-600 font-bold">Current image kept</span>
+                                            </div>
+                                        )}
                                         <input type="file" accept="image/*" className="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-orange-50 file:text-orange-600 hover:file:bg-orange-100 cursor-pointer" onChange={e => setProductFile(e.target.files[0])} />
                                     </div>
                                 </div>
@@ -1272,14 +1412,16 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                     <label htmlFor="hasAddons" className="text-sm font-bold text-gray-700 dark:text-gray-200 cursor-pointer">Allow Add-ons</label>
                                 </div>
 
-                                {/* 🟢 FEATURED ON HOMEPAGE TOGGLE */}
-                                <div className="flex items-center gap-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-800 p-3 rounded-xl">
-                                    <input type="checkbox" id="featured" className="w-5 h-5 text-orange-500 rounded focus:ring-orange-500" checked={!!newItem.featured} onChange={e => setNewItem({ ...newItem, featured: e.target.checked })} />
-                                    <div>
-                                        <label htmlFor="featured" className="text-sm font-bold text-orange-800 dark:text-orange-200 cursor-pointer">⭐ Feature on Homepage</label>
-                                        <p className="text-[10px] text-orange-500">Shows this item in the Featured Picks section on the home screen</p>
+                                {/* 🟢 FEATURED ON HOMEPAGE TOGGLE — Super Admin only */}
+                                {isSuperAdmin && (
+                                    <div className="flex items-center gap-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-800 p-3 rounded-xl">
+                                        <input type="checkbox" id="featured" className="w-5 h-5 text-orange-500 rounded focus:ring-orange-500" checked={!!newItem.featured} onChange={e => setNewItem({ ...newItem, featured: e.target.checked })} />
+                                        <div>
+                                            <label htmlFor="featured" className="text-sm font-bold text-orange-800 dark:text-orange-200 cursor-pointer">⭐ Feature on Homepage</label>
+                                            <p className="text-[10px] text-orange-500">Shows this item in the Featured Picks section on the home screen</p>
+                                        </div>
                                     </div>
-                                </div>
+                                )}
 
                                 {/* 🟢 PER-PRODUCT ADDON EDITOR */}
                                 {newItem.hasAddons !== false && (
@@ -1310,37 +1452,111 @@ export const AdminView = ({ setCurrentView, marketData, refreshData, user, setNo
                                 <textarea required placeholder="Description..." className="w-full p-3 rounded-xl bg-gray-50 dark:bg-gray-700 border-none h-20 resize-none dark:text-white" value={newItem.desc || ''} onChange={e => setNewItem({ ...newItem, desc: e.target.value })} />
                                 <button disabled={isSubmitting} className="w-full bg-gray-900 dark:bg-orange-600 text-white font-bold py-3 rounded-xl">{isSubmitting ? 'Uploading...' : 'Save Item'}</button>
                             </form></div>
-                        <div className="space-y-6">
-                            {isSuperAdmin ? (
-                                // Group by vendor for super admin
-                                Object.entries(
-                                    filteredMarketData.reduce((groups, item) => {
-                                        const v = item.vendor || 'Unknown';
-                                        if (!groups[v]) groups[v] = [];
-                                        groups[v].push(item);
-                                        return groups;
-                                    }, {})
-                                ).sort(([a], [b]) => a.localeCompare(b)).map(([vendorName, items]) => (
-                                    <div key={vendorName}>
-                                        {/* Vendor header */}
-                                        <div className="flex items-center gap-3 mb-2 sticky top-0 bg-gray-50 dark:bg-gray-950 py-1 z-10">
-                                            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-                                            <span className="text-xs font-black uppercase tracking-widest text-orange-500 whitespace-nowrap">
-                                                🏪 {vendorName} <span className="text-gray-400 font-normal">({items.length})</span>
-                                            </span>
-                                            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+                        <div className="space-y-3">
+                            {isSuperAdmin && loadingAllProducts && (
+                                <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
+                                    <div className="animate-spin w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full" />
+                                    <span className="text-sm font-medium">Loading all inventory...</span>
+                                </div>
+                            )}
+
+                            {isSuperAdmin && !loadingAllProducts ? (() => {
+                                const grouped = filteredMarketData.reduce((acc, item) => {
+                                    const v = item.vendor || 'Unknown';
+                                    if (!acc[v]) acc[v] = [];
+                                    acc[v].push(item);
+                                    return acc;
+                                }, {});
+                                const sortedVendors = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+                                const visibleVendors = inventoryFilter
+                                    ? sortedVendors.filter(v => v.toLowerCase().includes(inventoryFilter.toLowerCase()))
+                                    : sortedVendors;
+
+                                return (
+                                    <>
+                                        {/* VENDOR SEARCH + QUICK-JUMP CHIPS */}
+                                        <div className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-950 pb-2 pt-1 space-y-2">
+                                            {/* Search */}
+                                            <div className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2">
+                                                <Search className="w-4 h-4 text-gray-400 shrink-0" />
+                                                <input
+                                                    type="text"
+                                                    placeholder="Filter vendors..."
+                                                    value={inventoryFilter}
+                                                    onChange={e => setInventoryFilter(e.target.value)}
+                                                    className="bg-transparent outline-none text-sm w-full text-gray-700 dark:text-white placeholder-gray-400"
+                                                />
+                                                {inventoryFilter && <button onClick={() => setInventoryFilter('')} className="text-gray-400 hover:text-gray-600"><X className="w-3.5 h-3.5" /></button>}
+                                            </div>
+                                            {/* Quick-jump chips */}
+                                            <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+                                                <button
+                                                    onClick={() => setCollapsedVendors(new Set(sortedVendors))}
+                                                    className="shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 transition-colors"
+                                                >
+                                                    Collapse all
+                                                </button>
+                                                <button
+                                                    onClick={() => setCollapsedVendors(new Set())}
+                                                    className="shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 transition-colors"
+                                                >
+                                                    Expand all
+                                                </button>
+                                                {visibleVendors.map(v => (
+                                                    <button
+                                                        key={v}
+                                                        onClick={() => jumpToVendor(v)}
+                                                        className="shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 hover:bg-orange-200 transition-colors"
+                                                    >
+                                                        {v} ({grouped[v].length})
+                                                    </button>
+                                                ))}
+                                            </div>
                                         </div>
-                                        <div className="space-y-3">
-                                            {items.map(item => (
-                                                <ProductCard key={item.id} item={item} isAdmin={true} onEdit={handleEditClick} onDelete={handleDelete} />
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))
-                            ) : (
-                                // Flat list for vendor-specific admins (they only see their own)
+
+                                        {/* ACCORDION VENDOR SECTIONS */}
+                                        {visibleVendors.map(vendorName => {
+                                            const items = grouped[vendorName];
+                                            const isCollapsed = collapsedVendors.has(vendorName);
+                                            return (
+                                                <div key={vendorName} ref={el => vendorSectionRefs.current[vendorName] = el} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden shadow-sm">
+                                                    {/* Accordion header */}
+                                                    <button
+                                                        onClick={() => toggleVendorCollapse(vendorName)}
+                                                        className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                                                    >
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <span className="text-base">🏪</span>
+                                                            <span className="font-black text-gray-900 dark:text-white text-sm font-[Fredoka] truncate">{vendorName}</span>
+                                                            <span className="shrink-0 text-[10px] font-bold bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-300 px-2 py-0.5 rounded-full">{items.length} items</span>
+                                                        </div>
+                                                        {isCollapsed
+                                                            ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                                                            : <ChevronUp className="w-4 h-4 text-orange-500 shrink-0" />
+                                                        }
+                                                    </button>
+
+                                                    {/* Items list — hidden when collapsed */}
+                                                    {!isCollapsed && (
+                                                        <div className="px-3 pb-3 space-y-3 border-t border-gray-100 dark:border-gray-700 pt-3">
+                                                            {items.map(item => (
+                                                                <ProductCard key={item.id} item={item} isAdmin={true} onEdit={handleEditClick} onDelete={handleDelete} canDelete={isSuperAdmin} />
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+
+                                        {visibleVendors.length === 0 && (
+                                            <p className="text-center text-gray-400 text-sm py-8">No vendors match "{inventoryFilter}"</p>
+                                        )}
+                                    </>
+                                );
+                            })() : (
+                                // Flat list for sub-admins (their own vendor only)
                                 filteredMarketData.map(item => (
-                                    <ProductCard key={item.id} item={item} isAdmin={true} onEdit={handleEditClick} onDelete={handleDelete} />
+                                    <ProductCard key={item.id} item={item} isAdmin={true} onEdit={handleEditClick} onDelete={handleDelete} canDelete={isSuperAdmin} />
                                 ))
                             )}
                         </div>

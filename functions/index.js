@@ -128,6 +128,42 @@ exports.handleNewOrder = onDocumentCreated("orders/{orderId}", async (event) => 
 });
 
 /**
+ * 🟢 HELPER: Notify Riders that food is ready for pickup
+ */
+const alertDriversReady = async (orderData, orderIdShort) => {
+    try {
+        const groupDoc = await admin.firestore().collection("notifications").doc("logistics_group").get();
+        if (!groupDoc.exists) return console.log("No logistics group found");
+
+        const tokens = Object.values(groupDoc.data());
+        if (tokens.length === 0) return console.log("No drivers registered");
+
+        const vendorList = [...new Set((orderData.items || []).map(i => i.vendor))].join(", ");
+
+        const message = {
+            tokens,
+            notification: {
+                title: "🍽️ Food Ready — Go Pick Up!",
+                body: `Order #${orderIdShort} is ready at ${vendorList}. Head there now!`
+            },
+            android: {
+                priority: "high",
+                notification: { sound: "default", priority: "max", channelId: "order_alerts" }
+            },
+            apns: {
+                payload: { aps: { sound: "default", "content-available": 1 } }
+            },
+            data: { url: "/logistics" }
+        };
+
+        const response = await admin.messaging().sendEachForMulticast(message);
+        console.log(`✅ Ready Alert sent to ${response.successCount} riders`);
+    } catch (error) {
+        console.error("❌ Error alerting riders on ready:", error);
+    }
+};
+
+/**
  * 🟢 HELPER: Notify Vendors
  */
 const notifyVendors = async (order, orderIdShort) => {
@@ -165,14 +201,19 @@ const notifyVendors = async (order, orderIdShort) => {
 exports.handleOrderUpdate = onDocumentUpdated("orders/{orderId}", async (event) => {
     const newData = event.data.after.data();
     const prevData = event.data.before.data();
+    const orderIdShort = event.params.orderId.slice(0, 5).toUpperCase();
 
-    // Only run if status CHANGED to 'confirmed'
+    // Status changed to 'confirmed' — notify vendor + drivers (new paid order)
     if (newData.status === "confirmed" && prevData.status !== "confirmed") {
-        const orderIdShort = event.params.orderId.slice(0, 5).toUpperCase();
         console.log(`✅ Order #${orderIdShort} confirmed! Alerting vendor + logistics...`);
-
         await notifyVendors(newData, orderIdShort);
         await alertDrivers(newData);
+    }
+
+    // Status changed to 'ready' — food is prepared, alert riders to come pick it up
+    if (newData.status === "ready" && prevData.status !== "ready") {
+        console.log(`🍽️ Order #${orderIdShort} is READY! Alerting riders to pick up...`);
+        await alertDriversReady(newData, orderIdShort);
     }
 });
 

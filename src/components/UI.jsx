@@ -76,7 +76,7 @@ export const DietaryFilter = ({ icon: Icon, label, active, onClick }) => (
 );
 
 // --- 🍊 PRODUCT CARD (With Add-on Support) ---
-export const ProductCard = ({ item, onInteract, isAdmin, onDelete, onEdit, onNotify, isFavorite, onToggleFavorite }) => {
+export const ProductCard = ({ item, onInteract, isAdmin, onDelete, onEdit, onNotify, isFavorite, onToggleFavorite, canDelete }) => {
   const [showDesc, setShowDesc] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [quantity, setQuantity] = useState(1);
@@ -135,7 +135,7 @@ export const ProductCard = ({ item, onInteract, isAdmin, onDelete, onEdit, onNot
             {isAdmin ? (
                 <div className="flex gap-2">
                     <button onClick={() => onEdit(item)} className="p-2 bg-blue-50 text-blue-600 rounded-xl"><Edit className="w-4 h-4" /></button>
-                    <button onClick={() => onDelete(item.id)} className="p-2 bg-red-50 text-red-600 rounded-xl"><Trash2 className="w-4 h-4" /></button>
+                    {canDelete && <button onClick={() => onDelete(item.id)} className="p-2 bg-red-50 text-red-600 rounded-xl"><Trash2 className="w-4 h-4" /></button>}
                 </div>
             ) : (
                 <div className="flex items-center gap-2">
